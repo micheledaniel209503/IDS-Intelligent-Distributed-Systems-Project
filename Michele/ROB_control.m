@@ -11,10 +11,10 @@ function [u, omega] = ROB_control(state_rob, point_trg, u_sat, omega_sat, Kp_u, 
 wrap = @(a) atan2(sin(a), cos(a)); % wrap to choose the shortest rotation --> may need to unwrap the resulting rob.state(3)
 sat  = @(v,lim) max(min(v, lim), -lim);
 
-% tolerances/thresholds
-r_eps = 0.15;
+% tolerances/thresholds (to avoid infinitely long simulations)
+r_eps = 0.01; % [m] tolerance on final position
 theta_eps_s = deg2rad(8); % [rad] tolerance on initial orientation of rob
-theta_eps_e = deg2rad(1); % [rad] tolerance on final orientation of rob
+theta_eps_e = deg2rad(0.5); % [rad] tolerance on final orientation of rob
 
 % positions
 x_r = state_rob(1); y_r = state_rob(2); theta_r = state_rob(3);

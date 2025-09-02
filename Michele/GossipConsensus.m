@@ -246,8 +246,9 @@ end
 
 %% Organize transportation
 % Based on surface area of the package --> n° robots needed
-Packages(1).s = 1.3; % [m^2] surface area of the package
-robot_sc = 1/4; % [m^2] surface capacity of a robot
+clc;
+Packages(1).s = 4; % [m^2] surface area of the package
+robot_sc = 1/2; % [m^2] surface capacity of a robot
 
 disp('--- Organizing package transportation ---');
 RN = ceil(Packages(1).s / robot_sc);
@@ -259,15 +260,15 @@ disp(['Robots needed to carry package 1: ', num2str(RN)])
 % Find the indices of the first RN smallest distances
 % this only works because robots id = robots indices
 [~, sortedIndices] = sort(distances);
-Robots_selected = sortedIndices(1:RN);
+Robots_selected_id = sortedIndices(1:RN);
 
 disp('Indices of robots selected to carry the package: '); 
-disp(Robots_selected);
+disp(Robots_selected_id);
 
 % Plot: highlight selected robots
 figure(1)
-selX = S(Robots_selected, 1);
-selY = S(Robots_selected, 2);
+selX = S(Robots_selected_id, 1);
+selY = S(Robots_selected_id, 2);
 
 hSel = plot(selX, selY, 'ro', 'MarkerFaceColor','g', 'MarkerSize',10); 
 legend([hPkg, hEst, hSel], ...
@@ -278,22 +279,23 @@ legend([hPkg, hEst, hSel], ...
 %% TEST: ROBOT CONTROL
 % test: one robot must go from its initial position to pkg 1
 % robot params
-rob_id = Robots_selected(5); % select first robot from the list
+rob_id = Robots_selected_id(5); % select first robot from the list
 active_rob = Robots(rob_id);
 active_rob.state(3) = 0; % [rad] robot's initial orientation
 state_rob = [active_rob.state];
-disp(['Moving robot id: ', num2str(rob_id), '; robot properties at start: ']);
-disp(active_rob);
+% disp(['Moving robot id: ', num2str(rob_id), '; robot properties at start: ']);
+% disp(active_rob);
 u_sat = 3/3.6; % [m/s]
 omega_sat = 15*toRad; % [rad/s]
 Kp_u     = 0.5;          % gain
-Kp_theta = 2.0;          % gain
-r_goal   = 2;            % [m] distance from target at which to stop
-theta_goal = deg2rad(-20); % [rad] final robot orientation
+Kp_theta = 3.0;          % gain
+r_goal   = 0.2;            % [m] distance from target at which to stop
+theta_goal = deg2rad(90); % [rad] final robot orientation
 
 % package params
+active_pkg = Packages(1);
 state_pkg = [Packages(1).state(1); Packages(1).state(2)];
-disp('Package state: ');
+disp('Package position: ');
 disp(state_pkg)
 
 % Simulation parameters
@@ -306,44 +308,133 @@ disp(['Number of iterations: ', num2str(iter_sim)]);
 % robot dynamics
 fun = @(state, u, omega) [state(1) + u * cos(state(3)) * dt; state(2) + u * sin(state(3)) * dt; state(3) + omega * dt]; 
 
-% start sim
-traj = zeros(iter_sim, 3);  % [x, y, theta]
-for k = 1:iter_sim
-    % control
-    [u, omega] = ROB_control(state_rob, state_pkg, ...
-                             u_sat, omega_sat, ...
-                             Kp_u, Kp_theta, r_goal, theta_goal);
-    % update robot state
-    state_rob = fun(state_rob, u, omega);
-    traj(k, :) = state_rob'; % write on trajectory
+% % start sim
+% traj = zeros(iter_sim, 3);  % [x, y, theta]
+% for k = 1:iter_sim
+%     % control
+%     [u, omega] = ROB_control(active_rob.state, active_pkg.state, ...
+%                              u_sat, omega_sat, ...
+%                              Kp_u, Kp_theta, r_goal, theta_goal);
+%     % update robot state
+%     active_rob.state = fun(active_rob.state, u, omega);
+%     traj(k, :) = active_rob.state'; % write on trajectory
+% 
+%     % end of work condition
+%     % d = norm(state_pkg - state_rob(1:2));
+%     % e_goal = atan2(sin(theta_goal - state_rob(3)), cos(theta_goal - state_rob(3)));
+%     % if (d < r_goal && (theta_goal - state_rob(3) < deg2rad(3)))
+%     %     traj = traj(1:k,:);
+%     %     disp(['Arrived & aligned in ', num2str(k*dt), ' s']);
+%     %     break;
+%     % end
+% end
 
-    % end of work condition
-    % d = norm(state_pkg - state_rob(1:2));
-    % e_goal = atan2(sin(theta_goal - state_rob(3)), cos(theta_goal - state_rob(3)));
-    % if (d < r_goal && (theta_goal - state_rob(3) < deg2rad(3)))
-    %     traj = traj(1:k,:);
-    %     disp(['Arrived & aligned in ', num2str(k*dt), ' s']);
-    %     break;
-    % end
+% figure(1); hold on;
+% 
+% % trajectory
+% hTraj = plot(traj(:,1), traj(:,2), 'k-', 'LineWidth', 1.5);
+% % end point
+% hEnd = plot(active_rob.state(1), active_rob.state(2), 'go', 'MarkerSize', 8, 'MarkerFaceColor', 'y');
+% 
+% 
+% legend([hPkg, hEst, hSel, hTraj, hEnd], ...
+%        {'Package (true)', 'Consensus estimates', 'Selected robots', 'Robot trajectory', 'End position'}, ...
+%        'Location','best');
+% 
+% disp('---Simulation results---');
+% disp(['Robot state: X = ', num2str(active_rob.state(1)), ' Y = ', num2str(active_rob.state(2)), ' ang = ', num2str(active_rob.state(3)*toDeg)]);
+
+%%
+% figure(4)
+% plot(1:length(traj), traj(:, 3).*toDeg)
+% xlabel('iteration [-]')
+% ylabel('ang [deg]')
+
+%% TEST: all selected robots go to package
+% let's make all robots travel towards target
+% Set all robots' orientation to 0
+for j = 1:length(Robots)
+    Robots(j).state(3) = 0; % [rad] set robot's orientation to 0
+end
+
+
+
+% start sim
+% trajectories = zeros(iter_sim, 3, length(Robots));  % [x, y, theta] per each  robot
+% for k = 1:iter_sim
+%     for j = 1:length(Robots_selected_id)
+%         idx = Robots_selected_id(j); % select id
+%         % control
+%         [u, omega] = ROB_control(Robots(idx).state, Packages(1).state, ...
+%                                  u_sat, omega_sat, ...
+%                                  Kp_u, Kp_theta, r_goal, theta_goal);
+%         % update robot state
+%         Robots(idx).state = fun(Robots(idx).state, u, omega);
+%         trajectories(k, :, j) = Robots(idx).state.'; % write on trajectory
+% 
+%     end
+% end
+
+% figure(1); hold on;
+% for j = 1:length(Robots_selected_id)
+%     idx = Robots_selected_id(j);
+%     % trajectory
+%     plot(trajectories(:, 1, j), trajectories(:, 2, j), 'k-', 'LineWidth', 1.5);
+%     % end point
+%     plot(Robots(idx).state(1), Robots(idx).state(2), 'go', 'MarkerSize', 8, 'MarkerFaceColor', 'y');
+%     legend off;
+%     disp(['Robot id: ', num2str(Robots_selected_id(j)),' --- arrival angle: ' , num2str(Robots(Robots_selected_id(j)).state(3)*toDeg), ' [°]'])
+% end
+
+% % plot the angle history of the most distant robot
+% figure
+% plot(1:length(trajectories), trajectories(:, 3, 6).*toDeg)
+% xlabel('iteration [-]')
+% ylabel('ang [deg]')
+% title('History of orientation of the most distance robot')
+
+%% INITIAL FORMATION
+% Based on RN number of robots needed, divide the circle centered on the 
+% package position in RN slices and select equidistant points in this circle for the initial robot line-up
+
+r_goal = 0.0; % reach the exact point
+
+radius = Packages(1).s*0.75;
+
+lineup_points = ROB_lineup(RN, Packages(1).state, radius); % target points for the initial line-up procedure
+
+% start sim: ROBOT LINE-UP
+trajectories = zeros(iter_sim, 3, length(Robots));  % [x, y, theta] per each  robot
+for k = 1:iter_sim
+    for j = 1:length(Robots_selected_id) % from closest to most distant
+        idx = Robots_selected_id(j); % select id
+        % control
+        [u, omega] = ROB_control(Robots(idx).state, lineup_points(j, :), ...
+                                 u_sat, omega_sat, ...
+                                 Kp_u, Kp_theta, r_goal, theta_goal);
+        % update robot state
+        Robots(idx).state = fun(Robots(idx).state, u, omega);
+        trajectories(k, :, j) = Robots(idx).state.'; % write on trajectory
+
+    end
 end
 
 figure(1); hold on;
+for j = 1:length(Robots_selected_id)
+    idx = Robots_selected_id(j);
+    % trajectory
+    plot(trajectories(:, 1, j), trajectories(:, 2, j), 'k-', 'LineWidth', 0.75);
+    % end point
+    plot(Robots(idx).state(1), Robots(idx).state(2), 'go', 'MarkerSize', 8, 'MarkerFaceColor', 'y');    
+    % target points
+    plot(lineup_points(:, 1), lineup_points(:, 2), 'r*', 'MarkerSize', 8, 'MarkerFaceColor', 'r');
+    legend off;
+    disp(['Robot id: ', num2str(Robots_selected_id(j)),' --- arrival angle: ' , num2str(Robots(Robots_selected_id(j)).state(3)*toDeg), ' [°]'])
+end
 
-% trajectory
-hTraj = plot(traj(:,1), traj(:,2), 'k-', 'LineWidth', 1.5);
-% end point
-hEnd = plot(state_rob(1), state_rob(2), 'go', 'MarkerSize', 8, 'MarkerFaceColor', 'y');
-
-
-legend([hPkg, hEst, hSel, hTraj, hEnd], ...
-       {'Package (true)', 'Consensus estimates', 'Selected robots', 'Robot trajectory', 'End position'}, ...
-       'Location','best');
-
-disp('---Simulation results---');
-disp(['Robot state: X = ', num2str(state_rob(1)), ' Y = ', num2str(state_rob(2)), ' ang = ', num2str(state_rob(3)*toDeg)]);
-
-%%
-figure(4)
-plot(1:length(traj), traj(:, 3).*toDeg)
+% plot the angle history of the most distant robot (to check)
+figure
+plot(1:length(trajectories), trajectories(:, 3, length(Robots_selected_id)).*toDeg)
 xlabel('iteration [-]')
 ylabel('ang [deg]')
+title('History of orientation of the most distance robot')
