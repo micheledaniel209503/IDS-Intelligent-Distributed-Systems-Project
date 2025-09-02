@@ -278,16 +278,18 @@ legend([hPkg, hEst, hSel], ...
 %% TEST: ROBOT CONTROL
 % test: one robot must go from its initial position to pkg 1
 % robot params
-rob_id = Robots_selected(1); % select first robot from the list
-Robots(rob_id).state(3) = 0; % [rad] robot's initial orientation
-state_rob = [Robots(rob_id).state];
+rob_id = Robots_selected(5); % select first robot from the list
+active_rob = Robots(rob_id);
+active_rob.state(3) = 0; % [rad] robot's initial orientation
+state_rob = [active_rob.state];
 disp(['Moving robot id: ', num2str(rob_id), '; robot properties at start: ']);
-disp(Robots(rob_id));
-u_sat = 0.5; % [m/s]
-omega_sat = 5*toRad; % [rad/s]
+disp(active_rob);
+u_sat = 3/3.6; % [m/s]
+omega_sat = 15*toRad; % [rad/s]
 Kp_u     = 0.5;          % gain
 Kp_theta = 2.0;          % gain
-r_goal   = 0.3;          % [m] distance tolerance from target
+r_goal   = 2;            % [m] distance from target at which to stop
+theta_goal = deg2rad(-20); % [rad] final robot orientation
 
 % package params
 state_pkg = [Packages(1).state(1); Packages(1).state(2)];
@@ -296,7 +298,7 @@ disp(state_pkg)
 
 % Simulation parameters
 dt = 0.05; % [s] time step
-T_sim = 20; % [s] sim time
+T_sim = 70; % [s] sim time
 iter_sim = T_sim / dt; % Calculate the number of iterations
 disp(['--- Simulation ---']);
 disp(['Number of iterations: ', num2str(iter_sim)]);
@@ -307,24 +309,22 @@ fun = @(state, u, omega) [state(1) + u * cos(state(3)) * dt; state(2) + u * sin(
 % start sim
 traj = zeros(iter_sim, 3);  % [x, y, theta]
 for k = 1:iter_sim
-    % calcola controllo
+    % control
     [u, omega] = ROB_control(state_rob, state_pkg, ...
                              u_sat, omega_sat, ...
-                             Kp_u, Kp_theta);
-
-    % aggiorna stato con la dinamica unicycle
+                             Kp_u, Kp_theta, r_goal, theta_goal);
+    % update robot state
     state_rob = fun(state_rob, u, omega);
+    traj(k, :) = state_rob'; % write on trajectory
 
-    % salva traiettoria
-    traj(k, :) = state_rob';
-
-    % condizione di arrivo: se sei vicino al pacco, esci
-    d = norm(state_pkg - state_rob(1:2));
-    if d < r_goal
-        traj = traj(1:k, :);
-        disp(['Robot arrived in ', num2str(k*dt), ' s']);
-        break;
-    end
+    % end of work condition
+    % d = norm(state_pkg - state_rob(1:2));
+    % e_goal = atan2(sin(theta_goal - state_rob(3)), cos(theta_goal - state_rob(3)));
+    % if (d < r_goal && (theta_goal - state_rob(3) < deg2rad(3)))
+    %     traj = traj(1:k,:);
+    %     disp(['Arrived & aligned in ', num2str(k*dt), ' s']);
+    %     break;
+    % end
 end
 
 figure(1); hold on;
@@ -338,3 +338,12 @@ hEnd = plot(state_rob(1), state_rob(2), 'go', 'MarkerSize', 8, 'MarkerFaceColor'
 legend([hPkg, hEst, hSel, hTraj, hEnd], ...
        {'Package (true)', 'Consensus estimates', 'Selected robots', 'Robot trajectory', 'End position'}, ...
        'Location','best');
+
+disp('---Simulation results---');
+disp(['Robot state: X = ', num2str(state_rob(1)), ' Y = ', num2str(state_rob(2)), ' ang = ', num2str(state_rob(3)*toDeg)]);
+
+%%
+figure(4)
+plot(1:length(traj), traj(:, 3).*toDeg)
+xlabel('iteration [-]')
+ylabel('ang [deg]')
