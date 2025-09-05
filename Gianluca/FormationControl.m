@@ -18,8 +18,8 @@ Tfinal = 10;           % total sim time (s)
 K = round(Tfinal/Ts);
 form_R = 3;           % formation radius around package centroid
 %% Uncertainties
-noise_std = 0.5; % [m] std on the distance measures with the anchors
-sigma_theta = 0.05; % [RAD] std on the orientation measure 
+noise_std = 0.3; % [m] std on the distance measures with the anchors
+sigma_theta = 0.02; % [RAD] std on the orientation measure 
 Q = 0.1*eye(2); % process noise covariance (set to zero if no uncertainty on the model)
 
 %% Building the environment (only inbound zone)
@@ -166,8 +166,13 @@ for k = 2:K
         z_theta = th_i + sigma_theta*randn();
 
         % Estimation of position and orientation using EKF (based on the last control input)
-        [Robots(i).x_est, Robots(i).P] = unicycle_ekf(Robots(i).x, Robots(i).P, Robots(i).u, Robots(i).omega, Ts, anchors, distances_noisy, noise_std, Q, sigma_theta, z_theta);
+        [Robots(i).x_est, Robots(i).P] = unicycle_ekf(Robots(i).x_est, Robots(i).P, Robots(i).u, Robots(i).omega, Ts, anchors, distances_noisy, noise_std, Q, sigma_theta, z_theta);
          % Compute (proportional) unicycle control to reach desired_pos and orientation aligned with theta_des
+         % Choose type of controller:
+         % 1) GPT proportional control
+         % 2) Simple proportional controller
+
+        % [Robots(i).u, Robots(i).omega] = unicycle_controller1(Robots(i).x_est, desired_pos, desired_theta, k_rho, k_alpha,k_beta, v_max, omega_max);
         [Robots(i).u, Robots(i).omega] = unicycle_controller2(Robots(i).x_est, desired_pos, desired_theta, k_rho, k_alpha,k_beta, v_max, omega_max);
         
         % Integrate unicycle dynamics (simple Euler)
