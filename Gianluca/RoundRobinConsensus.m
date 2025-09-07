@@ -13,7 +13,7 @@ clc
 close all
 clear all
 
- %% Building the environment (only inbound zone)
+%% Building the environment (only inbound zone)
 % --------DEFINITIONS---------
 width = 100;
 height = 80;

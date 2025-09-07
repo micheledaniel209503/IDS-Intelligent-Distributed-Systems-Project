@@ -1,6 +1,6 @@
 clc; clear; close all;
 
-n = 6; % dimensione e numero di matrici Qk
+n = 15; % dimensione e numero di matrici Qk
 [x_opt,Qlist,Qprod] = RoundRobinQmatrix(n);
 
 disp('Soluzione ottimale per le variabili [x1..x2n]:')
