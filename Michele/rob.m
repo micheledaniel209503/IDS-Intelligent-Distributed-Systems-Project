@@ -4,6 +4,7 @@ classdef rob
         id     (1,1) int32  = int32(0)      % [-] identification number, 0 = unassigned
         u      (1,1) double = 0.0           % [m/s]
         omega  (1,1) double = 0.0           % [rad/s]
-        loaded (1,1) logical = false        % [-] working state
+        working_state (1,1) char = 'f'      % [-] working state: 'f' = free, 'l' = lineup, 't' = transportation
+        target (1,2) double = [NaN NaN]     % [x y] target position
     end
 end

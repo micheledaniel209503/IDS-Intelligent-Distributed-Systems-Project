@@ -307,65 +307,32 @@ disp(['Number of iterations: ', num2str(iter_sim)]);
 
 % robot dynamics
 fun = @(state, u, omega) [state(1) + u * cos(state(3)) * dt; state(2) + u * sin(state(3)) * dt; state(3) + omega * dt]; 
+%% INITIAL FORMATION
+% Based on RN number of robots needed, divide the circle centered on the 
+% package position in RN slices and select equidistant points in this circle for the initial robot line-up
 
-% % start sim
-% traj = zeros(iter_sim, 3);  % [x, y, theta]
-% for k = 1:iter_sim
-%     % control
-%     [u, omega] = ROB_control(active_rob.state, active_pkg.state, ...
-%                              u_sat, omega_sat, ...
-%                              Kp_u, Kp_theta, r_goal, theta_goal);
-%     % update robot state
-%     active_rob.state = fun(active_rob.state, u, omega);
-%     traj(k, :) = active_rob.state'; % write on trajectory
-% 
-%     % end of work condition
-%     % d = norm(state_pkg - state_rob(1:2));
-%     % e_goal = atan2(sin(theta_goal - state_rob(3)), cos(theta_goal - state_rob(3)));
-%     % if (d < r_goal && (theta_goal - state_rob(3) < deg2rad(3)))
-%     %     traj = traj(1:k,:);
-%     %     disp(['Arrived & aligned in ', num2str(k*dt), ' s']);
-%     %     break;
-%     % end
-% end
-
-% figure(1); hold on;
-% 
-% % trajectory
-% hTraj = plot(traj(:,1), traj(:,2), 'k-', 'LineWidth', 1.5);
-% % end point
-% hEnd = plot(active_rob.state(1), active_rob.state(2), 'go', 'MarkerSize', 8, 'MarkerFaceColor', 'y');
-% 
-% 
-% legend([hPkg, hEst, hSel, hTraj, hEnd], ...
-%        {'Package (true)', 'Consensus estimates', 'Selected robots', 'Robot trajectory', 'End position'}, ...
-%        'Location','best');
-% 
-% disp('---Simulation results---');
-% disp(['Robot state: X = ', num2str(active_rob.state(1)), ' Y = ', num2str(active_rob.state(2)), ' ang = ', num2str(active_rob.state(3)*toDeg)]);
-
-%%
-% figure(4)
-% plot(1:length(traj), traj(:, 3).*toDeg)
-% xlabel('iteration [-]')
-% ylabel('ang [deg]')
-
-%% TEST: all selected robots go to package
-% let's make all robots travel towards target
-% Set all robots' orientation to 0
 for j = 1:length(Robots)
     Robots(j).state(3) = 0; % [rad] set robot's orientation to 0
 end
 
+r_goal = 0.0; % reach the exact point
 
+radius = Packages(1).s*0.75;
 
-% start sim
+lineup_points = ROB_lineup(RN, Packages(1).state, radius); % target points for the initial line-up procedure
+
+% assign lineup_points to robots' target field
+for j = 1:length(Robots_selected_id)
+    idx = Robots_selected_id(j); % select robot id
+    Robots(idx).target = lineup_points(j, :); % assign target points to robots
+end
+%% start sim: ROBOT LINE-UP --- ROBOT control (simple, linear, non Voronoi-LLoyd)
 % trajectories = zeros(iter_sim, 3, length(Robots));  % [x, y, theta] per each  robot
 % for k = 1:iter_sim
-%     for j = 1:length(Robots_selected_id)
+%     for j = 1:length(Robots_selected_id) % from closest to most distant
 %         idx = Robots_selected_id(j); % select id
 %         % control
-%         [u, omega] = ROB_control(Robots(idx).state, Packages(1).state, ...
+%         [u, omega] = ROB_control(Robots(idx).state, lineup_points(j, :), ...
 %                                  u_sat, omega_sat, ...
 %                                  Kp_u, Kp_theta, r_goal, theta_goal);
 %         % update robot state
@@ -374,67 +341,65 @@ end
 % 
 %     end
 % end
-
+% 
 % figure(1); hold on;
 % for j = 1:length(Robots_selected_id)
 %     idx = Robots_selected_id(j);
 %     % trajectory
-%     plot(trajectories(:, 1, j), trajectories(:, 2, j), 'k-', 'LineWidth', 1.5);
+%     plot(trajectories(:, 1, j), trajectories(:, 2, j), 'k-', 'LineWidth', 0.75);
 %     % end point
-%     plot(Robots(idx).state(1), Robots(idx).state(2), 'go', 'MarkerSize', 8, 'MarkerFaceColor', 'y');
+%     plot(Robots(idx).state(1), Robots(idx).state(2), 'go', 'MarkerSize', 8, 'MarkerFaceColor', 'y');    
+%     % target points
+%     plot(lineup_points(:, 1), lineup_points(:, 2), 'r*', 'MarkerSize', 8, 'MarkerFaceColor', 'r');
 %     legend off;
 %     disp(['Robot id: ', num2str(Robots_selected_id(j)),' --- arrival angle: ' , num2str(Robots(Robots_selected_id(j)).state(3)*toDeg), ' [°]'])
 % end
-
-% % plot the angle history of the most distant robot
+% 
+% % plot the angle history of the most distant robot (to check)
 % figure
-% plot(1:length(trajectories), trajectories(:, 3, 6).*toDeg)
+% plot(1:length(trajectories), trajectories(:, 3, length(Robots_selected_id)).*toDeg)
 % xlabel('iteration [-]')
 % ylabel('ang [deg]')
 % title('History of orientation of the most distance robot')
 
-%% INITIAL FORMATION
-% Based on RN number of robots needed, divide the circle centered on the 
-% package position in RN slices and select equidistant points in this circle for the initial robot line-up
+%% LLOYD-VORONOI partitioning and control
 
-r_goal = 0.0; % reach the exact point
-
-radius = Packages(1).s*0.75;
-
-lineup_points = ROB_lineup(RN, Packages(1).state, radius); % target points for the initial line-up procedure
-
-% start sim: ROBOT LINE-UP
-trajectories = zeros(iter_sim, 3, length(Robots));  % [x, y, theta] per each  robot
-for k = 1:iter_sim
-    for j = 1:length(Robots_selected_id) % from closest to most distant
-        idx = Robots_selected_id(j); % select id
-        % control
-        [u, omega] = ROB_control(Robots(idx).state, lineup_points(j, :), ...
-                                 u_sat, omega_sat, ...
-                                 Kp_u, Kp_theta, r_goal, theta_goal);
-        % update robot state
-        Robots(idx).state = fun(Robots(idx).state, u, omega);
-        trajectories(k, :, j) = Robots(idx).state.'; % write on trajectory
-
-    end
+% NOTE: default working state for every robot: f
+% set working status for lineup robots
+for j = 1:RN
+    Robots(Robots_selected_id(j)).working_state = 'l';
 end
-
-figure(1); hold on;
+% assign lineup_points to robots' target field
 for j = 1:length(Robots_selected_id)
-    idx = Robots_selected_id(j);
-    % trajectory
-    plot(trajectories(:, 1, j), trajectories(:, 2, j), 'k-', 'LineWidth', 0.75);
-    % end point
-    plot(Robots(idx).state(1), Robots(idx).state(2), 'go', 'MarkerSize', 8, 'MarkerFaceColor', 'y');    
-    % target points
-    plot(lineup_points(:, 1), lineup_points(:, 2), 'r*', 'MarkerSize', 8, 'MarkerFaceColor', 'r');
-    legend off;
-    disp(['Robot id: ', num2str(Robots_selected_id(j)),' --- arrival angle: ' , num2str(Robots(Robots_selected_id(j)).state(3)*toDeg), ' [°]'])
+    idx = Robots_selected_id(j); % select robot id
+    Robots(idx).target = lineup_points(j, :); % assign target points to robots
 end
+sigma_lineup = 3;
+sigma_transport = 1;
 
-% plot the angle history of the most distant robot (to check)
-figure
-plot(1:length(trajectories), trajectories(:, 3, length(Robots_selected_id)).*toDeg)
-xlabel('iteration [-]')
-ylabel('ang [deg]')
-title('History of orientation of the most distance robot')
+% map grid
+xv = 0:1:100;   % X axis
+yv = 0:1:80;    % Y axis
+[X,Y] = meshgrid(xv, yv); % grid
+free_mask = true(size(X)); % free grid (no obstacles) --> matrix of ones
+
+% TEST voronoi tasselation
+robot_pos = zeros(length(Robots_selected_id), 2);
+for k = 1:length(Robots_selected_id)
+    robot_pos(k,:) = Robots(Robots_selected_id(k)).state(1:2);
+end
+% L = voronoi_labels_grid(X, Y, robot_pos, free_mask); % debug
+[L, areas, masses, centroids] = voronoi_lloyd(Robots, Robots_selected_id, X, Y, free_mask, sigma_lineup, sigma_transport);
+
+% plot
+figure;
+imagesc(xv, yv, L);
+set(gca,'YDir','normal'); axis equal tight; grid on
+colormap(lines(RN)); 
+colorbar('Ticks',1:RN,'TickLabels',compose('R%d',1:RN));
+title('Voronoi labels');
+hold on;
+plot(robot_pos(:,1), robot_pos(:,2), 'ko', 'MarkerFaceColor','y', 'MarkerSize',6);
+plot(centroids(:,1), centroids(:,2), 'r+', 'MarkerSize',10,'LineWidth',1.2);
+plot(lineup_points(:,1), lineup_points(:,2), 'bx', 'MarkerSize',10,'LineWidth',1.2);
+legend({'robots','centroids','targets'},'Location','bestoutside');
