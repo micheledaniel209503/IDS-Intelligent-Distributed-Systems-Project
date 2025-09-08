@@ -49,6 +49,7 @@ Robots(Nrobots,1) = rob();
 %% Dimension factor to set the width of the robots position spawn in x
 
 dimensionFactor = 0.8; % Example factor for robot width adjustment
+init_pos = zeros(Nrobots, 2);
 
 for k = 1:Nrobots
     Robots(k).id = k;
@@ -57,7 +58,7 @@ for k = 1:Nrobots
         % random spawn in the map (close to the inbound zone)
         x = map.W/2 * (1-dimensionFactor) + dimensionFactor * map.W * rand();
         y = zones.inbound.H + randn * 0.05 * map.H;
-
+        init_pos(k, :) = [x y];
         % check if inside inbound zone
         in_x = (x >= 0);
         in_y = (y >= zones.inbound.H);
@@ -317,7 +318,7 @@ end
 
 r_goal = 0.0; % reach the exact point
 
-radius = Packages(1).s*0.75;
+radius = Packages(1).s*1.25;
 
 lineup_points = ROB_lineup(RN, Packages(1).state, radius); % target points for the initial line-up procedure
 
@@ -374,7 +375,7 @@ for j = 1:length(Robots_selected_id)
     idx = Robots_selected_id(j); % select robot id
     Robots(idx).target = lineup_points(j, :); % assign target points to robots
 end
-sigma_lineup = 3;
+sigma_lineup = 1.5;
 sigma_transport = 1;
 
 % map grid
@@ -403,3 +404,106 @@ plot(robot_pos(:,1), robot_pos(:,2), 'ko', 'MarkerFaceColor','y', 'MarkerSize',6
 plot(centroids(:,1), centroids(:,2), 'r+', 'MarkerSize',10,'LineWidth',1.2);
 plot(lineup_points(:,1), lineup_points(:,2), 'bx', 'MarkerSize',10,'LineWidth',1.2);
 legend({'robots','centroids','targets'},'Location','bestoutside');
+
+%% LLOYD-VORONOI simulation
+% lineup
+% Simulation parameters
+dt = 0.05; % [s] time step
+T_sim = 140; % [s] sim time
+iter_sim = T_sim / dt; % Calculate the number of iterations
+disp(['--- Simulation ---']);
+disp(['Number of iterations: ', num2str(iter_sim)]);
+
+% SIGMA CHOICE:
+% sigma LOWER --> more precision on target, less mass for the cell --> slower AND more likely the centroid isn't even computed
+% sigma HIGHER --> less precision on target, more mass for the cell --> faster AND more reliable
+% if you want to use sigma LOWER --> lower the limit on the Mass of the cell
+% if you want to use sigma LARGER --> increase resolution of the grid
+
+sigma_lineup = 2.0;
+sigma_transport = 0.8;
+u_sat = 1/3.6; % [m/s]
+omega_sat = 30*toRad; % [rad/s]
+Kp_u     = 0.8;          % gain
+Kp_theta = 3.0;          % gain
+r_goal   = 0.0;            % [m] distance from target at which to stop
+theta_goal = deg2rad(0); % [rad] final robot orientation
+
+% optional keep theta bounded
+wrap = @(a) atan2(sin(a),cos(a));
+
+centroids_prev = nan(numel(Robots_selected_id),2);
+traj = zeros(iter_sim,3,numel(Robots_selected_id));  % log
+
+for j = 1:length(Robots_selected_id)
+    idx = Robots_selected_id(j); % select robot id
+    Robots(idx).state(1:2) = init_pos(j, :); % initialize robot positions
+end
+
+% plot
+RN   = numel(Robots_selected_id);
+cmap = lines(RN);
+
+figure(101); clf
+hImg = imagesc(xv, yv, L);               % prima L calcolata
+set(gca,'YDir','normal'); axis equal tight; grid on
+colormap(cmap); clim([0.5 RN+0.5]);
+colorbar('Ticks',1:RN,'TickLabels',compose('R%d',1:RN));
+title('LINEUP --- Lloyd/Voronoi'); hold on
+
+% target lineup
+plot(lineup_points(:,1), lineup_points(:,2), 'bx', 'MarkerSize',10, 'LineWidth',1.2);
+
+    % plot stuff
+    hRob  = gobjects(RN,1);
+    hCent = gobjects(RN,1);
+    hSeg  = gobjects(RN,1);
+    for j = 1:RN % initial step
+        id = Robots_selected_id(j);
+        p  = Robots(id).state(1:2);
+        hRob(j)  = plot(p(1), p(2), 'o', 'MarkerSize',6, ...
+                        'MarkerFaceColor',cmap(j,:), 'Color','k');
+        hCent(j) = plot(NaN, NaN, 'r+', 'MarkerSize',10, 'LineWidth',1.2);
+    end
+    refresh_every = 1;   % refresh plot every iteration
+
+for k = 1:iter_sim
+    % compute Voronoi partitioning + centroids for each robot
+    [L, areas, masses, centroids] = voronoi_lloyd( ...
+        Robots, Robots_selected_id, X, Y, free_mask, ...
+        sigma_lineup, sigma_transport);
+
+    % robot control + dynamics
+    for j = 1:numel(Robots_selected_id)
+        id = Robots_selected_id(j);
+        ci = centroids(j,:);
+
+        % control
+        [u, omega] = ROB_control(Robots(id).state, ci, ...
+                                 u_sat, omega_sat, Kp_u, Kp_theta, ...
+                                 r_goal, theta_goal);
+        % dyna
+        Robots(id).state = fun(Robots(id).state, u, omega);
+
+        % wrap theta
+        Robots(id).state(3) = wrap(Robots(id).state(3));
+
+        % update trajectory for each robot
+        traj(k,:,j) = Robots(id).state;
+    end
+
+
+
+        % plot
+        if mod(k, refresh_every) == 0
+            set(hImg, 'CData', L);        % voronoi labels
+            for j = 1:RN
+                id = Robots_selected_id(j);
+                px = Robots(id).state(1); py = Robots(id).state(2);
+                set(hRob(j), 'XData', px, 'YData', py); % robot marker
+                cx = centroids(j,1); cy = centroids(j,2);
+                set(hCent(j), 'XData', cx, 'YData', cy);
+            end
+            drawnow limitrate nocallbacks
+        end
+end

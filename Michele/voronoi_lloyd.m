@@ -1,5 +1,5 @@
 function [L, areas, masses, centroids] = voronoi_lloyd(Robots, Robots_voronoi, X, Y, free_mask, sigma_lineup, sigma_transport)
-% WAREHOUSE_VORONOI
+% DESCRIPTION
 %   - Uses "voronoi_labels_grid" to assign each point of a cell to a robot
 %   - Builds a pdf (either gaussian or uniform) after reading each robot's working state and target
 %   - Computes area, mass and centroid per each cell (each robot)
@@ -81,7 +81,7 @@ function [L, areas, masses, centroids] = voronoi_lloyd(Robots, Robots_voronoi, X
         M = sum(w(:)) * cell_area; % integral of Phi(x,y)*dxdy  =  sum(Phi)*dA
         masses(k) = M;
 
-            if M <= 1e-15 % if mass is null --> no centroid
+            if M <= 1e-30 % !!! this has to be fine tuned !!! if mass is null --> no centroid
                 centroids(k,:) = [NaN NaN];
             else % define centroid
                 Cx = sum(sum(X .* w)) * cell_area / M; % look at theory
