@@ -1,4 +1,4 @@
-function [L, areas, masses, centroids] = voronoi_lloyd(Robots, Robots_voronoi, X, Y, free_mask, sigma_lineup, sigma_transport)
+function [L, areas, masses, centroids, Phi] = voronoi_lloyd_ring_dyna(Robots, Robots_voronoi, X, Y, free_mask, sigma_lineup, sigma_ring, R)
 % DESCRIPTION
 %   - Uses "voronoi_labels_grid" to assign each point of a cell to a robot
 %   - Builds a pdf (either gaussian or uniform) after reading each robot's working state and target
@@ -7,7 +7,7 @@ function [L, areas, masses, centroids] = voronoi_lloyd(Robots, Robots_voronoi, X
 % INPUT
 %   Robots(i): class
 %       .state  = [x y theta]
-%       .working_state  = 'f' | 'l' | 't'
+%       .working_state  = 'f' | 'l' | 'r'
 %       .target = [xt yt] 
 %   Robots_voronoi: vector of indeces to select robots that will be given a Voronoi cell (maybe optional)
 %   X,Y        : meshgrid
@@ -48,10 +48,18 @@ function [L, areas, masses, centroids] = voronoi_lloyd(Robots, Robots_voronoi, X
                 sg = sigma_lineup;
                 Phi(:,:,k) = gauss2d(X, Y, mu, sg^2*eye(2)); % build Phi (bivariate Gaussian)
 
-            case 't' % transport
-                mu = pick_target(r, robot_pos(k,:)); % mean value of Phi must be the robot's target --> trajectory defined
-                sg = sigma_transport;
-                Phi(:,:,k) = gauss2d(X, Y, mu, sg^2*eye(2)); % build Phi (bivariate Gaussian)
+            case 'r' % ring
+                assert(R>0,'R must be > 0 for adaptive sigma.');
+                sigma0   = sigma_ring;    % sigma near ring
+                sigmaMax = 5*sigma0;      % limit on sigma
+                mu_pkg = pick_target(r, robot_pos(k,:));
+                p  = robot_pos(k,:); 
+                d  = abs(norm(p - mu_pkg) - R); % distance from ring
+                sigma_k = ((d + R)/R) * sigma0; % adaptive sigma
+                if sigma_k > sigmaMax
+                    sigma_k = sigmaMax;  % saturation
+                end
+                Phi(:,:,k) = ring2d(X, Y, mu_pkg, R, sigma_k, 1e-3);
 
             case 'f' % free
                     Phi(:,:,k) = ones(m,n);  % uniform pdf --> optimal coverage (classic Voronoi)
