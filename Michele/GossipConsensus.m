@@ -248,8 +248,8 @@ end
 %% Organize transportation
 % Based on surface area of the package --> n° robots needed
 clc;
-Packages(1).s = 4; % [m^2] surface area of the package
-robot_sc = 1/2; % [m^2] surface capacity of a robot
+Packages(1).s = 28; % [m^2] surface area of the package
+robot_sc = 4; % [m^2] surface capacity of a robot
 
 disp('--- Organizing package transportation ---');
 RN = ceil(Packages(1).s / robot_sc);
@@ -266,48 +266,6 @@ Robots_selected_id = sortedIndices(1:RN);
 disp('Indices of robots selected to carry the package: '); 
 disp(Robots_selected_id);
 
-% Plot: highlight selected robots
-figure(1)
-selX = S(Robots_selected_id, 1);
-selY = S(Robots_selected_id, 2);
-
-hSel = plot(selX, selY, 'ro', 'MarkerFaceColor','g', 'MarkerSize',10); 
-legend([hPkg, hEst, hSel], ...
-       {'Package (true)', 'Consensus estimates', 'Selected robots'}, ...
-       'Location','best');
-
-
-%% TEST: ROBOT CONTROL
-% test: one robot must go from its initial position to pkg 1
-% robot params
-rob_id = Robots_selected_id(5); % select first robot from the list
-active_rob = Robots(rob_id);
-active_rob.state(3) = 0; % [rad] robot's initial orientation
-state_rob = [active_rob.state];
-% disp(['Moving robot id: ', num2str(rob_id), '; robot properties at start: ']);
-% disp(active_rob);
-u_sat = 3/3.6; % [m/s]
-omega_sat = 15*toRad; % [rad/s]
-Kp_u     = 0.5;          % gain
-Kp_theta = 3.0;          % gain
-r_goal   = 0.2;            % [m] distance from target at which to stop
-theta_goal = deg2rad(90); % [rad] final robot orientation
-
-% package params
-active_pkg = Packages(1);
-state_pkg = [Packages(1).state(1); Packages(1).state(2)];
-disp('Package position: ');
-disp(state_pkg)
-
-% Simulation parameters
-dt = 0.05; % [s] time step
-T_sim = 70; % [s] sim time
-iter_sim = T_sim / dt; % Calculate the number of iterations
-disp(['--- Simulation ---']);
-disp(['Number of iterations: ', num2str(iter_sim)]);
-
-% robot dynamics
-fun = @(state, u, omega) [state(1) + u * cos(state(3)) * dt; state(2) + u * sin(state(3)) * dt; state(3) + omega * dt]; 
 %% INITIAL FORMATION
 % Based on RN number of robots needed, divide the circle centered on the 
 % package position in RN slices and select equidistant points in this circle for the initial robot line-up
@@ -316,31 +274,21 @@ for j = 1:length(Robots)
     Robots(j).state(3) = 0; % [rad] set robot's orientation to 0
 end
 
-r_goal = 0.0; % reach the exact point
+radius = ceil(sqrt(Packages(1).s / pi)*1.5); % compute radius from Packages(1).s circular surface
 
-radius = Packages(1).s*1.25;
+disp('Radius of the package ');
+disp([radius]);
 
 lineup_points = ROB_lineup(RN, Packages(1).state, radius); % target points for the initial line-up procedure
 
-% assign lineup_points to robots' target field
-for j = 1:length(Robots_selected_id)
-    idx = Robots_selected_id(j); % select robot id
-    Robots(idx).target = lineup_points(j, :); % assign target points to robots
-end
-%% LLOYD-VORONOI partitioning and control
-
-% NOTE: default working state for every robot: f
-% set working status for lineup robots
-for j = 1:RN
-    Robots(Robots_selected_id(j)).working_state = 'l';
-end
-% assign lineup_points to robots' target field
-for j = 1:length(Robots_selected_id)
-    idx = Robots_selected_id(j); % select robot id
-    Robots(idx).target = lineup_points(j, :); % assign target points to robots
-end
-sigma_lineup = 1.5;
-sigma_transport = 1;
+%% LLOYD-VORONOI simulation setup parameters
+% lineup
+% Simulation parameters
+dt = 0.05; % [s] time step
+T_sim = 200; % [s] sim time
+iter_sim = T_sim / dt; % Calculate the number of iterations
+disp(['--- Simulation Setup ---']);
+disp(['Number of iterations: ', num2str(iter_sim)]);
 
 % map grid
 dx = 0.5;
@@ -349,36 +297,6 @@ xv = 0:dx:100;   % X axis
 yv = 0:dy:80;    % Y axis
 [X,Y] = meshgrid(xv, yv); % grid
 free_mask = true(size(X)); % free grid (no obstacles) --> matrix of ones
-
-% TEST voronoi tasselation
-robot_pos = zeros(length(Robots_selected_id), 2);
-for k = 1:length(Robots_selected_id)
-    robot_pos(k,:) = Robots(Robots_selected_id(k)).state(1:2);
-end
-% L = voronoi_labels_grid(X, Y, robot_pos, free_mask); % debug
-[L, areas, masses, centroids] = voronoi_lloyd(Robots, Robots_selected_id, X, Y, free_mask, sigma_lineup, sigma_transport);
-
-% plot
-figure;
-imagesc(xv, yv, L);
-set(gca,'YDir','normal'); axis equal tight; grid on
-colormap(lines(RN)); 
-colorbar('Ticks',1:RN,'TickLabels',compose('R%d',1:RN));
-title('Voronoi labels');
-hold on;
-plot(robot_pos(:,1), robot_pos(:,2), 'ko', 'MarkerFaceColor','y', 'MarkerSize',6);
-plot(centroids(:,1), centroids(:,2), 'r+', 'MarkerSize',10,'LineWidth',1.2);
-plot(lineup_points(:,1), lineup_points(:,2), 'bx', 'MarkerSize',10,'LineWidth',1.2);
-legend({'robots','centroids','targets'},'Location','bestoutside');
-
-%% LLOYD-VORONOI simulation setup parameters
-% lineup
-% Simulation parameters
-dt = 0.05; % [s] time step
-T_sim = 210; % [s] sim time
-iter_sim = T_sim / dt; % Calculate the number of iterations
-disp(['--- Simulation ---']);
-disp(['Number of iterations: ', num2str(iter_sim)]);
 
 % SIGMA CHOICE:
 % sigma LOWER --> more precision on target, less mass for the cell --> slower AND more likely the centroid isn't even computed
@@ -398,85 +316,96 @@ theta_goal = deg2rad(0); % [rad] final robot orientation
 % optional keep theta bounded
 wrap = @(a) atan2(sin(a),cos(a));
 traj = zeros(iter_sim,3,numel(Robots_selected_id));  % log
-%% VORONOI-LLOYD with LINEUP POINTS simulation: ALL ROBOT tasselation
-% Let's select all robots 
-Robots_voronoi = zeros(length(Robots), 1);
-Robots_voronoi = [Robots(:).id]';
-
-% initial position of robots
-for j = 1:length(Robots_voronoi)
-    idx = Robots_voronoi(j); % select robot id
-    Robots(idx).state(1:2) = init_pos(j, :); % initialize robot positions
-end
 
 
-% plot
-RN   = numel(Robots_voronoi);
-cmap = lines(RN);
-
-figure(101); clf
-hImg = imagesc(xv, yv, L);               % prima L calcolata
-set(gca,'YDir','normal'); axis equal tight; grid on
-colormap(cmap); clim([0.5 RN+0.5]);
-colorbar('Ticks',1:length(Robots_voronoi),'TickLabels',compose('R%d',1:length(Robots_voronoi)));
-title('LINEUP with LINEUP POINTS: all robots --- Lloyd/Voronoi'); hold on
-
-% target lineup
-plot(lineup_points(:,1), lineup_points(:,2), 'bx', 'MarkerSize',10, 'LineWidth',1.2);
-
-    % plot stuff
-    hRob  = gobjects(RN,1);
-    hCent = gobjects(RN,1);
-    hSeg  = gobjects(RN,1);
-    for j = 1:RN % initial step
-        id = Robots_voronoi(j);
-        p  = Robots(id).state(1:2);
-        hRob(j)  = plot(p(1), p(2), 'o', 'MarkerSize',6, ...
-                        'MarkerFaceColor',cmap(j,:), 'Color','k');
-        hCent(j) = plot(NaN, NaN, 'r+', 'MarkerSize',10, 'LineWidth',1.2);
-    end
-    refresh_every = 1;   % refresh plot every iteration
-
-for k = 1:iter_sim
-    % compute Voronoi partitioning + centroids for each robot
-    [L, areas, masses, centroids] = voronoi_lloyd( ...
-        Robots, Robots_voronoi, X, Y, free_mask, ...
-        sigma_lineup, sigma_transport);
-
-    % robot control + dynamics
-    for j = 1:numel(Robots_voronoi)
-        id = Robots_voronoi(j);
-        ci = centroids(j,:);
-
-        % control
-        [u, omega] = ROB_control(Robots(id).state, ci, ...
-                                 u_sat, omega_sat, Kp_u, Kp_theta, ...
-                                 r_goal, theta_goal);
-        % dyna
-        Robots(id).state = fun(Robots(id).state, u, omega);
-
-        % wrap theta
-        Robots(id).state(3) = wrap(Robots(id).state(3));
-
-        % update trajectory for each robot
-        traj(k,:,j) = Robots(id).state;
-    end
-
-
-
-        % plot
-        if mod(k, refresh_every) == 0
-            set(hImg, 'CData', L);        % voronoi labels
-            for j = 1:RN
-                id = Robots_voronoi(j);
-                px = Robots(id).state(1); py = Robots(id).state(2);
-                set(hRob(j), 'XData', px, 'YData', py); % robot marker
-                cx = centroids(j,1); cy = centroids(j,2);
-                set(hCent(j), 'XData', cx, 'YData', cy);
-            end
-            drawnow limitrate nocallbacks
-        end
-end
+% ROBOT DYNAMICS
+% Unicycle dynamics
+fun = @(state, u, omega) [state(1) + u * cos(state(3)) * dt; state(2) + u * sin(state(3)) * dt; state(3) + omega * dt]; 
+% %% VORONOI-LLOYD with LINEUP POINTS simulation: ALL ROBOT tasselation
+% % Let's select all robots 
+% Robots_voronoi = [Robots(:).id]';
+% 
+% % NOTE: default working state for every robot: f
+% % set working status for lineup robots
+% for j = 1:RN
+%     Robots(Robots_selected_id(j)).working_state = 'l';
+% end
+% % assign lineup_points to robots' target field
+% for j = 1:length(Robots_selected_id)
+%     idx = Robots_selected_id(j); % select robot id
+%     Robots(idx).target = lineup_points(j, :); % assign target points to robots
+% end
+% % initial position of robots
+% for j = 1:length(Robots_voronoi)
+%     idx = Robots_voronoi(j); % select robot id
+%     Robots(idx).state(1:2) = init_pos(j, :); % initialize robot positions
+% end
+% 
+% [L, areas, masses, centroids] = voronoi_lloyd(Robots, Robots_selected_id, X, Y, free_mask, sigma_lineup, sigma_transport); % first L
+% 
+% % plot
+% RN   = numel(Robots_voronoi);
+% cmap = lines(RN);
+% 
+% figure(101); clf
+% hImg = imagesc(xv, yv, L);               % prima L calcolata
+% set(gca,'YDir','normal'); axis equal tight; grid on
+% colormap(cmap); clim([0.5 RN+0.5]);
+% colorbar('Ticks',1:length(Robots_voronoi),'TickLabels',compose('R%d',1:length(Robots_voronoi)));
+% title('LINEUP with LINEUP POINTS: all robots --- Lloyd/Voronoi'); hold on
+% 
+% % target lineup
+% plot(lineup_points(:,1), lineup_points(:,2), 'bx', 'MarkerSize',10, 'LineWidth',1.2);
+% 
+%     % plot stuff
+%     hRob  = gobjects(RN,1);
+%     hCent = gobjects(RN,1);
+%     for j = 1:RN % initial step
+%         id = Robots_voronoi(j);
+%         p  = Robots(id).state(1:2);
+%         hRob(j)  = plot(p(1), p(2), 'o', 'MarkerSize',6, ...
+%                         'MarkerFaceColor',cmap(j,:), 'Color','k');
+%         hCent(j) = plot(NaN, NaN, 'r+', 'MarkerSize',10, 'LineWidth',1.2);
+%     end
+%     refresh_every = 1;   % refresh plot every iteration
+% 
+% for k = 1:iter_sim
+%     % compute Voronoi partitioning + centroids for each robot
+%     [L, areas, masses, centroids] = voronoi_lloyd( ...
+%         Robots, Robots_voronoi, X, Y, free_mask, ...
+%         sigma_lineup, sigma_transport);
+% 
+%     % robot control + dynamics
+%     for j = 1:numel(Robots_voronoi)
+%         id = Robots_voronoi(j);
+%         ci = centroids(j,:);
+% 
+%         % control
+%         [u, omega] = ROB_control(Robots(id).state, ci, ...
+%                                  u_sat, omega_sat, Kp_u, Kp_theta, ...
+%                                  r_goal, theta_goal);
+%         % dyna
+%         Robots(id).state = fun(Robots(id).state, u, omega);
+% 
+%         % wrap theta
+%         Robots(id).state(3) = wrap(Robots(id).state(3));
+%     end
+% 
+% 
+% 
+%         % plot
+%         if mod(k, refresh_every) == 0
+%             set(hImg, 'CData', L);        % voronoi labels
+%             for j = 1:RN
+%                 id = Robots_voronoi(j);
+%                 px = Robots(id).state(1); py = Robots(id).state(2);
+%                 set(hRob(j), 'XData', px, 'YData', py); % robot marker
+%                 cx = centroids(j,1); cy = centroids(j,2);
+%                 set(hCent(j), 'XData', cx, 'YData', cy);
+%             end
+%             drawnow limitrate nocallbacks
+%         end
+% end
 
 %% LINEUP without lineup function
 % i want to make the robots go on around the package without any lineup fun
@@ -499,31 +428,36 @@ end
 
 r_goal = 0; % distance at which to stop
 
+disp('--- STARTING LINEUP PROCEDURE...');
+
+[L, areas, masses, centroids] = voronoi_lloyd_ring_dyna(Robots, Robots_selected_id, X, Y, free_mask, sigma_lineup, sigma_ring, radius); % first L
 
 % plot
 RN   = numel(Robots_voronoi);
 cmap = lines(RN);
 
 figure(101); clf
-hImg = imagesc(xv, yv, L);               % prima L calcolata
+hImg = imagesc(xv, yv, L); % first L
 set(gca,'YDir','normal'); axis equal tight; grid on
 colormap(cmap); clim([0.5 RN+0.5]);
 colorbar('Ticks',1:length(Robots_voronoi),'TickLabels',compose('R%d',1:length(Robots_voronoi)));
 title('RING LINEUP: all robots --- Lloyd/Voronoi'); hold on
 
-% target lineup
-plot(lineup_points(:,1), lineup_points(:,2), 'bx', 'MarkerSize',10, 'LineWidth',1.2);
-
     % plot stuff
     hRob  = gobjects(RN,1);
     hCent = gobjects(RN,1);
-    hSeg  = gobjects(RN,1);
+    center = Packages(1).state(1:2); % plot ring
+    tt = linspace(0, 2*pi, 361);
+    xr = center(1) + radius*cos(tt);
+    yr = center(2) + radius*sin(tt);
     for j = 1:RN % initial step
         id = Robots_voronoi(j);
         p  = Robots(id).state(1:2);
         hRob(j)  = plot(p(1), p(2), 'o', 'MarkerSize',6, ...
                         'MarkerFaceColor',cmap(j,:), 'Color','k');
         hCent(j) = plot(NaN, NaN, 'r+', 'MarkerSize',10, 'LineWidth',1.2);
+        hRing = plot(xr, yr, 'k--', 'LineWidth', 1);
+        hPkg = plot(center(1), center(2), 'bs', 'MarkerSize', 10);
     end
     refresh_every = 1;   % refresh plot every iteration
 
@@ -547,12 +481,7 @@ for k = 1:iter_sim
 
         % wrap theta
         Robots(id).state(3) = wrap(Robots(id).state(3));
-
-        % update trajectory for each robot
-        traj(k,:,j) = Robots(id).state;
     end
-
-
 
         % plot
         if mod(k, refresh_every) == 0
@@ -568,17 +497,25 @@ for k = 1:iter_sim
         end
 end
 
-%%
+disp('--- LINEUP ENDED !');
+
+for i = 1:length(Robots_selected_id)
+    idx = Robots_selected_id(i);
+    Robots(idx).working_state = 't'; % set working state to 't' transportation
+end
+
+
+%% Debugging the pdfs
 ring_pdf = ring2d(X, Y, Packages(1).state, radius, 2, 1e-3);
 figure
-%imagesc(xv, yv, ring_pdf); axis xy; colorbar;
 surf(xv,yv,ring_pdf); shading interp; colorbar;
 
-% Check which robots in "Robots" have working_state = 'r'
-robots_with_r_state = find(arrayfun(@(r) strcmp(r.working_state, 'r'), Robots));
 
-
-idx_use = Robots_voronoi;
-mu_pkg = Packages(1).state(1:2);
-opts = struct('logscale', true, 'mode','ring', 'mu_pkg', mu_pkg, 'R', radius);
-figure; plot_phi_debug(Phi, X, Y, L, Robots, idx_use, centroids, opts);
+% % Check which robots in "Robots" have working_state = 'r'
+% robots_with_r_state = find(arrayfun(@(r) strcmp(r.working_state, 'r'), Robots));
+% 
+% 
+% idx_use = Robots_voronoi;
+% mu_pkg = Packages(1).state(1:2);
+% opts = struct('logscale', true, 'mode','ring', 'mu_pkg', mu_pkg, 'R', radius);
+% figure; plot_phi_debug(Phi, X, Y, L, Robots, idx_use, centroids, opts);

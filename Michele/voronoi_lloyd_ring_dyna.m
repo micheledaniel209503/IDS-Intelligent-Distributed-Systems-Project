@@ -51,7 +51,8 @@ function [L, areas, masses, centroids, Phi] = voronoi_lloyd_ring_dyna(Robots, Ro
             case 'r' % ring
                 assert(R>0,'R must be > 0 for adaptive sigma.');
                 sigma0   = sigma_ring;    % sigma near ring
-                sigmaMax = 5*sigma0;      % limit on sigma
+                %sigmaMax = 5*sigma0 % good
+                sigmaMax = 3*sigma0;      % limit on sigma
                 mu_pkg = pick_target(r, robot_pos(k,:));
                 p  = robot_pos(k,:); 
                 d  = abs(norm(p - mu_pkg) - R); % distance from ring
@@ -59,7 +60,12 @@ function [L, areas, masses, centroids, Phi] = voronoi_lloyd_ring_dyna(Robots, Ro
                 if sigma_k > sigmaMax
                     sigma_k = sigmaMax;  % saturation
                 end
-                Phi(:,:,k) = ring2d(X, Y, mu_pkg, R, sigma_k, 1e-3);
+                Phi(:,:,k) = ring2d(X, Y, mu_pkg, R, sigma_k, 1e-15);
+                
+            case 't' % transportation
+                    mu = robot_pos(k,:);
+                    sigma_transport = 1.5; % any value small enough will do fine
+                    Phi(:,:,k) = gauss2d(X, Y, mu, sigma_transport); % centroid --> your position
 
             case 'f' % free
                     Phi(:,:,k) = ones(m,n);  % uniform pdf --> optimal coverage (classic Voronoi)
