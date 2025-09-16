@@ -10,7 +10,7 @@ function [x_opt,Qlist,Qprod] = RoundRobinQmatrix(n)
 %   Qlist = cell array containing matrices Qk
 %   Qprod = product Qn*Qn-1*...*Q1
 
-    tol = 1/(5*n); % lower bound for the unknown
+    tol = 0; % lower bound for the unknown
 
     % Number of variables: 2 per each Qk
     nVars = 2*n;

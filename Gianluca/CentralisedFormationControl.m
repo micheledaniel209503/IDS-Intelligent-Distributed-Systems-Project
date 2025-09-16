@@ -14,7 +14,7 @@ clc; clear all; close all;
 
 %% Simulation Parameters
 Ts = 0.05;            % timestep
-Tfinal = 10;           % total sim time (s)
+Tfinal = 70;           % total sim time (s)
 K = round(Tfinal/Ts);
 form_R = 3;           % formation radius around package centroid
 %% Uncertainties
@@ -39,19 +39,28 @@ anchors(:,2) = map.H * rand(Nanchors,1);
 Package.c(1) = map.W/1.5;
 Package.c(2) = map.H/3;
 
-% Desired trajectory for the package (arc of circle)
+%% Desired trajectory for the package (figure-eight path using Lissajous curve)
 c_center = [Package.c(1); Package.c(2)];
-traj_Amp = 25;                % Traj. radius
-omega_traj = 0.2;             % angular velocity
-for k=1:K
+traj_Amp = 25;                % trajectory amplitude
+omega_traj = 0.1;             % angular frequency
+
+for k = 1:K
     t = (k-1)*Ts;
-    c_des(:,k) = c_center - [traj_Amp;0] + traj_Amp * [cos(omega_traj*t); sin(omega_traj*t)];
-    c_des_dot(:,k) = traj_Amp*omega_traj * [-sin(omega_traj*t); cos(omega_traj*t)];
-    if atan2(c_des_dot(2,k),c_des_dot(1,k))>=0
-        theta_des(k) = atan2(c_des_dot(2,k),c_des_dot(1,k));
+
+    % Figure-eight trajectory (Lissajous curve)
+    c_des(:,k) = c_center + [traj_Amp * sin(omega_traj * t);
+                             traj_Amp * sin(2 * omega_traj * t) / 2];
+
+    % Velocity (time derivative)
+    c_des_dot(:,k) = [traj_Amp * omega_traj * cos(omega_traj * t);
+                      traj_Amp * omega_traj * cos(2 * omega_traj * t)];
+
+    % Orientation angle (continuous theta)
+    if atan2(c_des_dot(2,k), c_des_dot(1,k)) >= 0
+        theta_des(k) = atan2(c_des_dot(2,k), c_des_dot(1,k));
     else
-        theta_des(k) = atan2(c_des_dot(2,k),c_des_dot(1,k)) + 2*pi;
-    end % in order to obtain a continuous theta
+        theta_des(k) = atan2(c_des_dot(2,k), c_des_dot(1,k)) + 2*pi;
+    end
 end
 
 
@@ -81,8 +90,8 @@ phi = linspace(0, 2*pi, Nrobots + 1); phi = phi(1:end-1);
 for i = 1:Nrobots
     Robots(i).id = i;
     Robots(i).x = zeros(3,1);
-    Robots(i).x(1) = Package.c(1) + form_R * cos(phi(i)) + 0.5*randn(); % X
-    Robots(i).x(2) = Package.c(2) + form_R * sin(phi(i)) + 0.5*randn(); % Y
+    Robots(i).x(1) = Package.c(1) + form_R * cos(phi(i)) + 0.2*randn(); % X
+    Robots(i).x(2) = Package.c(2) + form_R * sin(phi(i)) + 0.2*randn(); % Y
     Robots(i).x(3) = theta_des(1); % heading
 end
 
@@ -114,11 +123,11 @@ end
 
 
 %% Controller gains and limits
-k_rho   = 3.0;      % linear
-k_alpha = 2.0;      % bearing
+k_rho   = 2.0;      % linear
+k_alpha = 1.0;      % bearing
 k_beta  = -1.0;     % final heading (must be negative)
-v_max = 20.0;         % m/s
-omega_max = 20.5;     % rad/s
+v_max = 5.0;         % m/s
+omega_max = 1.0;     % rad/s
 
 %% Initialize figure for animation
 fig = fig+1;
@@ -173,7 +182,7 @@ for k = 2:K
          % 2) Simple proportional controller
 
         % [Robots(i).u, Robots(i).omega] = unicycle_controller1(Robots(i).x_est, desired_pos, desired_theta, k_rho, k_alpha,k_beta, v_max, omega_max);
-        [Robots(i).u, Robots(i).omega] = unicycle_controller2(Robots(i).x_est, desired_pos, desired_theta, k_rho, k_alpha,k_beta, v_max, omega_max);
+        [Robots(i).u, Robots(i).omega] = unicycle_controller1(Robots(i).x_est, cd, desired_theta, k_rho, k_alpha,k_beta, v_max, omega_max);
         
         % Integrate unicycle dynamics (simple Euler)
         x_i = x_i + Robots(i).u * cos(th_i) * dt;
@@ -194,7 +203,7 @@ for k = 2:K
     end
     set(h_package,'XData',Package.c(1),'YData',Package.c(2));
     
-    drawnow;
+    drawnow limitrate nocallbacks;
 end
 
 % err_traj = sqrt((act_traj(1,:)-c_des(1,:)).^2+(act_traj(1,:)-c_des(2,:)).^2);
