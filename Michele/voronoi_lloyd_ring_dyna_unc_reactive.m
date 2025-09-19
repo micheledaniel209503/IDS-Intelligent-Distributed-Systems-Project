@@ -1,4 +1,4 @@
-function [L, areas, masses, centroids, Phi] = voronoi_lloyd_ring_dyna(Robots, Robots_voronoi, X, Y, free_mask, sigma_lineup, sigma_ring, R)
+function [L, areas, masses, centroids, Phi, Wrs_set] = voronoi_lloyd_ring_dyna_unc_reactive(Robots, Robots_voronoi, X, Y, free_mask, sigma_lineup, sigma_ring, R, use_reactive, rs)
 % DESCRIPTION
 %   - Uses "voronoi_labels_grid" to assign each point of a cell to a robot
 %   - Builds a pdf (either gaussian or uniform) after reading each robot's working state and target
@@ -21,6 +21,8 @@ function [L, areas, masses, centroids, Phi] = voronoi_lloyd_ring_dyna(Robots, Ro
     % Robots_voronoi can be either the indeces or the id's of the robots (since they coincide)
     N = length(Robots_voronoi); % n° robots
     idx_use = Robots_voronoi(:); % indeces of the robots in the list of robots that are going to be given a Voronoi cell
+    obs = ~free_mask; % obstacles mask
+    Wrs_set = cell(N,1); % initialization
     
     % grid spacing
     dx = mean(diff(unique(X(1,:)))); % horizontal dim of a cell
@@ -28,13 +30,24 @@ function [L, areas, masses, centroids, Phi] = voronoi_lloyd_ring_dyna(Robots, Ro
     cell_area = dx * dy; % area of each grid's cell (elmentary cell)
     
     % positions of the selected robots
-    robot_pos = zeros(length(idx_use), 2);
+    robot_pos_est = zeros(length(idx_use), 2);
     for k = 1:length(idx_use)
-        robot_pos(k,:) = Robots(idx_use(k)).state(1:2);
+        robot_pos_est(k,:) = Robots(idx_use(k)).state_est(1:2);
     end
 
     % Voronoi tasselation for the selected robots
-    L = voronoi_labels_grid(X, Y, robot_pos, free_mask);
+    L = voronoi_labels_grid(X, Y, robot_pos_est, free_mask);
+
+    % Reactive control for static obstacles (optional)
+    if use_reactive
+        ds = 0.5*min( mean(diff(unique(X(1,:)))), mean(diff(unique(Y(:,1)))) ); % sampling step for the line of sight check
+        for k = 1:N % for each robot
+            pr = robot_pos_est(k,:);
+            Vmask = (L == k) & free_mask; % voronoi cell
+            Wrs_set{k} = build_Wrs_fast_ray2(pr, Vmask, obs, X, Y, rs, ds); % build the reduced cell
+        end
+    end
+
 
     % pdf for each robot(Phi(:,:,i))
     [m,n] = size(X); % size of map
@@ -44,7 +57,7 @@ function [L, areas, masses, centroids, Phi] = voronoi_lloyd_ring_dyna(Robots, Ro
         working_state = lower(r.working_state);
         switch working_state
             case 'l' % lineup
-                mu = pick_target(r, robot_pos(k,:)); % mean value of Phi must be the robot's target --> lineup point
+                mu = pick_target(r, robot_pos_est(k,:)); % mean value of Phi must be the robot's target --> lineup point
                 sg = sigma_lineup;
                 Phi(:,:,k) = gauss2d(X, Y, mu, sg^2*eye(2)); % build Phi (bivariate Gaussian)
 
@@ -53,8 +66,8 @@ function [L, areas, masses, centroids, Phi] = voronoi_lloyd_ring_dyna(Robots, Ro
                 sigma0   = sigma_ring;    % sigma near ring
                 %sigmaMax = 5*sigma0 % good
                 sigmaMax = 3*sigma0;      % limit on sigma
-                mu_pkg = pick_target(r, robot_pos(k,:));
-                p  = robot_pos(k,:); 
+                mu_pkg = pick_target(r, robot_pos_est(k,:));
+                p  = robot_pos_est(k,:); 
                 d  = abs(norm(p - mu_pkg) - R); % distance from ring
                 sigma_k = ((d + R)/R) * sigma0; % adaptive sigma
                 if sigma_k > sigmaMax
@@ -63,7 +76,7 @@ function [L, areas, masses, centroids, Phi] = voronoi_lloyd_ring_dyna(Robots, Ro
                 Phi(:,:,k) = ring2d(X, Y, mu_pkg, R, sigma_k, 1e-15);
                 
             case 't' % transportation
-                    mu = robot_pos(k,:);
+                    mu = robot_pos_est(k,:);
                     sigma_transport = 1.5; % any value small enough will do fine
                     Phi(:,:,k) = gauss2d(X, Y, mu, sigma_transport); % centroid --> your position
 
@@ -88,6 +101,10 @@ function [L, areas, masses, centroids, Phi] = voronoi_lloyd_ring_dyna(Robots, Ro
                 centroids(k,:)= [NaN NaN];
                 continue;
             end
+        % Reactive control --> use Wrs instead of whole voronoi cell
+        if use_reactive
+            mask_k = Wrs_set{k};
+        end
 
         w = Phi(:,:,k); % k-th robot's pdf
         w(~mask_k) = 0; % must be zero outside mask --> only integrate it on the mask : this is coherent with theory (only integrate on the voronoi cell's domain)
