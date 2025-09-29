@@ -12,6 +12,9 @@ function [L, areas, masses, centroids, Phi, Wrs_set] = voronoi_lloyd_ring_dyna_u
 %   Robots_voronoi: vector of indeces to select robots that will be given a Voronoi cell (maybe optional)
 %   X,Y        : meshgrid
 %   free_mask  : logic, true = cell is available for tasselation | false = cell is unavailable (obstacle/forbidden area...)
+%   sigma_ring : value for the ring pdf
+%   R          : ring radius
+%   use_reactive: flag --> if false --> use standard voronoi
 % OUTPUT
 %   L          : Voronoi labels
 %   areas      : area for each robot
