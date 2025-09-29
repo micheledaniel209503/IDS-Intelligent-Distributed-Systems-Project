@@ -56,7 +56,7 @@ for k = 1:Nrobots
     while ~valid_pos
         % random spawn in the map (close to the inbound zone)
         x = map.W/2 * (1-dimensionFactor) + dimensionFactor * map.W * rand();
-        y = zones.inbound.H + randn * 0.05 * map.H;
+        y = zones.inbound.H + randn * 0.03 * map.H;
         init_pos(k, :) = [x y];
         % check if inside inbound zone
         in_x = (x >= 0);
@@ -312,7 +312,7 @@ Robots_voronoi = [Robots(:).id]'; % all robots in the tasselation
 sigma_ring = 1.25;
 sigma_lineup = 1.5;
 sigma_transport = 1.0;
-u_sat = 1/3.6; % [m/s]
+u_sat = 2.5/3.6; % [m/s]
 omega_sat = 30*toRad; % [rad/s]
 Kp_u     = 0.8;          % gain
 Kp_theta = 3.0;          % gain
@@ -354,10 +354,11 @@ for a = 1:Nanchors
 end
 
 %% Generate random obstacles in the grid
-Nobs = 15;
-obstacle_dim = 8.0; % [m] characteristic dimension of the obstacles (global)
+Nobs = 3;
+obstacle_dim = 13.0; % [m] characteristic dimension of the obstacles (global)
+min_dist = 12; % [m] distance between centers of the obstacles
 
-Obstacles = spawn_obstacles(Nobs, map, obstacle_dim);
+Obstacles = spawn_obstacles(Nobs, map, obstacle_dim, min_dist);
 
 % Adapt the grid
 free_mask = true(size(X)); % initialization : free grid (no obstacles) --> matrix of ones
@@ -389,6 +390,17 @@ for i = 1:length(Robots_selected_id)
     Robots(idx).target = Packages(1).state(1:2);
 end
 
+% Select two robots that are NOT in Robots_selected_id and send them on two
+% points
+Robots_unselected_id = setdiff(1:Nrobots, Robots_selected_id);
+idx1 = Robots_unselected_id(1);
+idx2 = Robots_unselected_id(end);
+Robots(idx1).working_state = 'p';
+Robots(idx2).working_state = 'p';
+Robots(idx1).target = [70, 70];
+Robots(idx2).target = [80, 10];
+
+
 %% Initialisation for the estimation algorithm (recursive least square)
 % We can't use EKF for the estimate's initialization (static situation)
 for i = 1:length(Robots_voronoi)
@@ -414,27 +426,29 @@ trace_P = zeros(iter_sim); % initialization;
 
 disp('--- STARTING LINEUP...');
 
-use_reactive = true;   % flag: if false --> use standard voronoi (no cutting for the cells)
-rsense       = 8.0;
+USEREACTIVE = true;   % flag: if false --> use standard voronoi (no cutting for the cells, no obstacle avoidance)
+DRAWCONTOUR = true;   % flag: draw contours of the voronoi cells
+rsense      = 10.0;  % [m] sensing radius for the robots (can be reduced in order to manage the collision avoidance in a different way)
 
 for i=1:numel(Robots)
     Robots(i).sr = rsense;
 end
 
-[L, areas, masses, centroids, Phi, Wrs_set] = voronoi_lloyd_ring_dyna_unc_reactive(Robots, Robots_voronoi, X, Y, free_mask, sigma_lineup, sigma_ring, Packages(1).r, use_reactive);
+[L, areas, masses, centroids, Phi, Wrs_set] = voronoi_lloyd_ring_dyna_unc_reactive(Robots, Robots_voronoi, X, Y, free_mask, sigma_lineup, sigma_ring, Packages(1).r, USEREACTIVE);
 
 % plot
 RN   = numel(Robots_voronoi);
-cmap = lines(RN);
 
 figure(101); clf
 imagesc(xv, yv, free_mask); set(gca,'YDir','normal'); colormap(gray); axis equal tight; hold on
 hTitle = title(sprintf('RING LINEUP (WITH UNCERTAINTIES): 0.0%%'));
 cmap = lines(numel(Wrs_set));
-for k = 1:numel(Wrs_set)
-    if any(Wrs_set{k}(:))
-        contour(xv, yv, double(Wrs_set{k}), [0.5 0.5], ...
-                'Color', cmap(k,:), 'LineWidth', 1.4);
+if DRAWCONTOUR == true
+    for k = 1:numel(Wrs_set)
+        if any(Wrs_set{k}(:))
+            contour(xv, yv, double(Wrs_set{k}), [0.5 0.5], ...
+                    'Color', cmap(k,:), 'LineWidth', 1.4);
+        end
     end
 end
 hold on
@@ -491,7 +505,7 @@ for k = 1:iter_sim
     % compute Voronoi partitioning + centroids for each robot
     [L, areas, masses, centroids, Phi, Wrs_set] = voronoi_lloyd_ring_dyna_unc_reactive( ...
         Robots, Robots_voronoi, X, Y, free_mask, ...
-        sigma_lineup, sigma_ring, Packages(1).r, use_reactive);
+        sigma_lineup, sigma_ring, Packages(1).r, USEREACTIVE);
 
     % robot control + dynamics
     for j = 1:numel(Robots_voronoi)
@@ -526,7 +540,7 @@ for k = 1:iter_sim
                 set(hCent(j), 'XData', cx, 'YData', cy);
             end
     
-            if mod(k, refresh_contours_every) == 0
+            if (mod(k, refresh_contours_every) == 0 && DRAWCONTOUR == true)
                 ax = gca;
                 hOld = findall(ax,'Type','Contour');
                 delete(hOld);

@@ -1,4 +1,4 @@
-function [L, areas, masses, centroids, Phi, Wrs_set] = voronoi_lloyd_ring_dyna_unc_reactive(Robots, Robots_voronoi, X, Y, free_mask, sigma_lineup, sigma_ring, R, use_reactive)
+function [L, areas, masses, centroids, Phi, Wrs_set] = voronoi_lloyd_ring_dyna_unc_reactive(Robots, Robots_voronoi, X, Y, free_mask, sigma_point, sigma_ring, R, use_reactive)
 % DESCRIPTION
 %   - Uses "voronoi_labels_grid" to assign each point of a cell to a robot
 %   - Builds a pdf (either gaussian or uniform) after reading each robot's working state and target
@@ -7,7 +7,7 @@ function [L, areas, masses, centroids, Phi, Wrs_set] = voronoi_lloyd_ring_dyna_u
 % INPUT
 %   Robots(i): class
 %       .state  = [x y theta]
-%       .working_state  = 'f' | 'l' | 'r'
+%       .working_state  = 'p' | 'f' | 'l' | 'r'
 %       .target = [xt yt] 
 %   Robots_voronoi: vector of indeces to select robots that will be given a Voronoi cell (maybe optional)
 %   X,Y        : meshgrid
@@ -59,15 +59,21 @@ function [L, areas, masses, centroids, Phi, Wrs_set] = voronoi_lloyd_ring_dyna_u
         r = Robots(idx_use(k)); % select k-th robot
         working_state = lower(r.working_state);
         switch working_state
-            case 'l' % lineup
+            case 'p' % point (adaptive sigma)
+                sigma0 = sigma_point;
+                sigmaMax = 5*sigma0;
                 mu = pick_target(r, robot_pos_est(k,:)); % mean value of Phi must be the robot's target --> lineup point
-                sg = sigma_lineup;
-                Phi(:,:,k) = gauss2d(X, Y, mu, sg^2*eye(2)); % build Phi (bivariate Gaussian)
+                p  = robot_pos_est(k,:);  % current robot position
+                d  = norm(p - mu);  % distance to the target
+                sigma_k = ((d + R)/R) * sigma0;  % adaptive sigma = sigma0*(1 + d/R)
+                if sigma_k > sigmaMax
+                   sigma_k = sigmaMax;                   % saturation
+                end
+                Phi(:,:,k) = gauss2d(X, Y, mu, sigma_k^2*eye(2)); % build Phi (bivariate Gaussian)
 
-            case 'r' % ring
+            case 'r' % ring (adaptive sigma)
                 assert(R>0,'R must be > 0 for adaptive sigma.');
                 sigma0   = sigma_ring;    % sigma near ring
-                %sigmaMax = 5*sigma0 % good
                 sigmaMax = 3*sigma0;      % limit on sigma
                 mu_pkg = pick_target(r, robot_pos_est(k,:));
                 p  = robot_pos_est(k,:); 
@@ -78,10 +84,10 @@ function [L, areas, masses, centroids, Phi, Wrs_set] = voronoi_lloyd_ring_dyna_u
                 end
                 Phi(:,:,k) = ring2d(X, Y, mu_pkg, R, sigma_k, 1e-15);
                 
-            case 't' % transportation
+            case 't' % transportation TO BE TESTED
                     mu = robot_pos_est(k,:);
                     sigma_transport = 1.5; % any value small enough will do fine
-                    Phi(:,:,k) = gauss2d(X, Y, mu, sigma_transport); % centroid --> your position
+                    Phi(:,:,k) = gauss2d(X, Y, mu, sigma_transport^2*eye(2)); % centroid --> your position
 
             case 'f' % free
                     Phi(:,:,k) = ones(m,n);  % uniform pdf --> optimal coverage (classic Voronoi)
