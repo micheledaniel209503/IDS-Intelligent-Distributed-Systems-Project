@@ -42,13 +42,13 @@ G = @(x, y, theta, vel, omega, dT)[ dT*cos(theta), 0; dT*sin(theta), 0; 0,  dT ]
 
 %% Simulation Parameters
 Ts = 0.01;            % timestep
-Tfinal = 300;           % total sim time (s)
+Tfinal = 50;           % total sim time (s)
 K = round(Tfinal/Ts);
 form_R = 2.5;           % formation radius around package centroid
 %% Uncertainties
-noise_std = 0.3; % [m] std on the distance measures with the anchors
-sigma_theta = 0.02; % [RAD] std on the orientation measure 
-Q = 0.1*eye(2); % process noise covariance (set to zero if no uncertainty on the model)
+noise_std = 0.5; % [m] std on the distance measures with the anchors
+sigma_theta = 0.05; % [RAD] std on the orientation measure 
+Q = 0.1*eye(2); % process noise covariance
 
 %% Building the environment (only inbound zone)
 width = 100;
@@ -58,14 +58,14 @@ map.H = height;
 map.polygon = [0 0; map.W 0; map.W map.H; 0 map.H];
 
 %% Generate random obstacles
-Nobs = 4;
+Nobs = 0;
 obstacle_dim = 10.0;   % [m] size of obstacles
 minDist = obstacle_dim + 2*form_R + 4;          % minimum clearance between obstacles
 obstacles = spawn_obstacles(Nobs, map, obstacle_dim, minDist);
 
 %% Anchors
 % Choose N of anchors
-Nanchors = 4;
+Nanchors = 3;
 anchors = zeros(Nanchors,2);
 anchors(:,1) = map.W * rand(Nanchors,1);
 anchors(:,2) = map.H * rand(Nanchors,1);
@@ -135,6 +135,21 @@ end
 for i=1:Nrobots
     Robots(i).u = 0;
     Robots(i).omega = 0;
+end
+
+%% Initialisation for the relative distance estimate
+for i=1:Nrobots
+    Robots(i).rel_dist = zeros(Nrobots,1);
+    Robots(i).P_rel_dist = 0.5 * ones(Nrobots,1);
+    p_i = Robots(i).x_est(1:2);
+     for j = 1:Nrobots
+            if j == i
+                continue;
+            end
+            p_j = Robots(j).x_est(1:2);
+
+            Robots(i).rel_dist(j) = norm(p_i-p_j);
+     end
 end
 
 
@@ -240,14 +255,26 @@ for k = 2:K
             end
 
             pos_j = Robots(j).x_est(1:2);   % use estimated position of robot j
-
             diff = pos_i - pos_j;
-            dij = norm(diff);            % actual distance between i and j
+
+            % Distance measured with Lidar:
+            lidar_std = 0.02; % Lidar std
+            dist_meas = norm(diff) + lidar_std * randn();
+            Robots(i) = relative_dist_KF(Robots(i), Robots(j), j, dist_meas, lidar_std^2, dt);
+            dij = Robots(i).rel_dist(j);            % actual distance between i and j
+            %dij = norm(diff);
 
             % compute circular-formation desired distance (chord length)
             k_sep = abs(i - j);
             k_sep = min(k_sep, Nrobots - k_sep);   % shortest wrap-around separation
             d_des_ij = norm(2 * form_R * sin(pi * k_sep / Nrobots));
+
+            if i == 1 && j==2
+                pos_i_real = Robots(i).x(1:2);
+                pos_j_real = Robots(j).x(1:2);
+                dist_real = norm(pos_i_real-pos_j_real);
+                dist_est = dij;
+            end
 
             % accumulate formation term
             u_form = u_form - (dij^2 - d_des_ij^2) * diff;
@@ -391,17 +418,18 @@ u_des = w_form * u_form + w_obs * u_obs_global;
     if mod(k, 20) == 0
         disp(['Progress: ', num2str(k/K * 100), ' %']);
         disp(['Package state: ','x: ',num2str(Package.c(1)),'y: ',num2str(Package.c(2))])
+        disp(['Dist R.1-2, real: ', num2str(dist_real), ' est: ',num2str(dist_est), ' diff: ', num2str(norm(dist_real-dist_est))])
     end
 end
 
 
-% fig = fig+1;
-% figure(fig); clf; hold on;
-% plot(linspace(0,Tfinal,K),trace_P)
-% plot(linspace(0,Tfinal,K),trace_P);
-% ylabel('Trace of Matrix P ');
-% title('mean trace of Covariance Matrix over Time');
-% grid on;
+fig = fig+1;
+figure(fig); clf; hold on;
+plot(linspace(0,Tfinal,K),trace_P)
+plot(linspace(0,Tfinal,K),trace_P);
+ylabel('Trace of Matrix P ');
+title('mean trace of Covariance Matrix over Time');
+grid on;
 
 
 %% TO DO

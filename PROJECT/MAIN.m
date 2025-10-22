@@ -16,7 +16,10 @@ addpath(genpath(pwd));
 toRad = pi / 180; % Conversion factor from degrees to radians
 toDeg = 180 / pi; % Conversion factor from radians to degrees
 
-%% Building the environment (only inbound zone)
+%% Parameters
+tolerance_on_lineup_form_radius = 0.3; % radial tolerance for the initial position of robots in lineup phase
+
+%% Building the environment
 % --------DEFINITIONS---------
 width = 100;
 height = 80;
@@ -124,9 +127,6 @@ xStore(:,:,1) = x0;
 if nNonNaN == 0
     warning('No robot sees the package.');
     return;
-% elseif nNonNaN == 1
-%     warning('only one robot sees the package.');
-%     return;
 end
 
 % Extract the initial subset (only those that see)
@@ -182,6 +182,9 @@ for t = 1:n_msg
     xStore(idxNonNaN,:,t+1) = x_next_sub;
 end
 %disp(Q_tot);
+
+% assign to the package its own state estimate
+Packages(1).state_est = mean(xStore_sub(:,:,end),1);
 
 disp(['Real package position (x, y): ', num2str(Packages(1).state(1)), '  ', num2str(Packages(1).state(2))]);
 disp(['Est. package position (x, y): ', num2str(xStore_sub(1,1,end)), '  ',num2str(xStore_sub(1,2,end))]);
@@ -264,7 +267,7 @@ close all; % close previous figures
 %  --------------------------------
 %% ORGANIZE TRANSPORTATION
 % Based on surface area of the package --> n° robots needed
-Packages(1).s = 28; % [m^2] surface area of the package
+Packages(1).s = 20; % [m^2] surface area of the package
 robot_sc = 4; % [m^2] surface capacity of a robot
 
 disp('--- Organizing package transportation ---');
@@ -278,6 +281,11 @@ disp(['Robots needed to carry package 1: ', num2str(RN)])
 % this only works because robots id = robots indices
 [~, sortedIndices] = sort(distances);
 Robots_selected_id = sortedIndices(1:RN);
+
+% Associate the package to the robots, using the field item_id
+for i=1:length(Robots_selected_id)
+    Robots(Robots_selected_id(i)).item_id = 1; % change with more than one package
+end
 
 disp('Indices of robots selected to carry the package: '); 
 disp(Robots_selected_id);
@@ -402,7 +410,6 @@ Robots(idx2).target = [80, 10];
 
 
 %% Initialisation for the estimation algorithm (recursive least square)
-% We can't use EKF for the estimate's initialization (static situation)
 for i = 1:length(Robots_voronoi)
     distances = sqrt(sum((anchors - [Robots(i).state(1), Robots(i).state(2)]).^2, 2));
     distances_noisy = distances + noise_std * randn(Nanchors, 1);
@@ -507,18 +514,72 @@ for k = 1:iter_sim
         Robots, Robots_voronoi, X, Y, free_mask, ...
         sigma_lineup, sigma_ring, Packages(1).r, USEREACTIVE);
 
+    % check the robots lineup for every package
+    for i = 1:Npack
+        % Get all robots carrying package i
+        robots_id_itemId_i = [];  % initialize empty list
+
+        for r = 1:length(Robots)
+            % Skip robots with empty or NaN item_id
+            if isempty(Robots(r).item_id) || isnan(Robots(r).item_id)
+                continue;
+            end
+        
+            % Check if this robot carries the i-th package
+            if Robots(r).item_id == i
+                robots_id_itemId_i = [robots_id_itemId_i, Robots(r).id];
+            end
+        end
+
+        % Skip if no robots are assigned to this package
+        if isempty(robots_id_itemId_i)
+            continue;
+        end
+        
+        % Check alignment for each robot
+        allAligned = true; 
+        
+        for id = robots_id_itemId_i
+            % Skip if robot is already in transport phase
+            if Robots(id).working_state == 't'
+                continue;
+            end
+            
+            % Check alignment for this robot
+            isAligned = isRobotAligned(Robots(id), Packages(i).state_est, Packages(i).r, tolerance_on_lineup_form_radius);
+            % If even one robot is not aligned, stop checking further
+            if ~isAligned
+                allAligned = false;
+                break;
+            end
+        end
+        
+        % If all robots are aligned, switch their state to t
+        if allAligned
+            for id = robots_id_itemId_i
+                Robots(id).working_state = 't';
+            end
+        end
+    end
+
     % robot control + dynamics
     for j = 1:numel(Robots_voronoi)
         id = Robots_voronoi(j);
         ci = centroids(j,:);
 
         % control
-        [u, omega] = ROB_control(Robots(id).state_est, ci, ...
-                                 u_sat, omega_sat, Kp_u, Kp_theta, ...
-                                 r_goal, theta_goal);
+        if Robots(j).working_state ~= 't'
+            [u, omega] = ROB_control(Robots(id).state_est, ci, ...
+                                     u_sat, omega_sat, Kp_u, Kp_theta, ...
+                                     r_goal, theta_goal);
+        end
+        if Robots(j).working_state == 't'
+            u=0;
+            omega=0;
+        end
         Robots(id).u = u;
         Robots(id).omega = omega;
-
+        
         % dyna
         %Robots(id).state = fun(Robots(id).state, u, omega, dt);
         Robots(id).state = fun2(Robots(id).state(1), Robots(id).state(2), Robots(id).state(3), u, omega, dt);

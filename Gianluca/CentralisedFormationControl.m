@@ -121,7 +121,6 @@ for i=1:Nrobots
     Robots(i).omega = 0;
 end
 
-
 %% Controller gains and limits
 k_rho   = 2.0;      % linear
 k_alpha = 1.0;      % bearing
