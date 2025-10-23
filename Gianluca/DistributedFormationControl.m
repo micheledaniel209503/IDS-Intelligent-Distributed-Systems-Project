@@ -42,13 +42,13 @@ G = @(x, y, theta, vel, omega, dT)[ dT*cos(theta), 0; dT*sin(theta), 0; 0,  dT ]
 
 %% Simulation Parameters
 Ts = 0.01;            % timestep
-Tfinal = 50;           % total sim time (s)
+Tfinal = 300;           % total sim time (s)
 K = round(Tfinal/Ts);
 form_R = 2.5;           % formation radius around package centroid
 %% Uncertainties
-noise_std = 0.5; % [m] std on the distance measures with the anchors
-sigma_theta = 0.05; % [RAD] std on the orientation measure 
-Q = 0.1*eye(2); % process noise covariance
+noise_std = 0.3; % [m] std on the distance measures with the anchors
+sigma_theta = 0.02; % [RAD] std on the orientation measure 
+Q = 0.1*eye(2); % process noise covariance (set to zero if no uncertainty on the model)
 
 %% Building the environment (only inbound zone)
 width = 100;
@@ -59,13 +59,13 @@ map.polygon = [0 0; map.W 0; map.W map.H; 0 map.H];
 
 %% Generate random obstacles
 Nobs = 0;
-obstacle_dim = 10.0;   % [m] size of obstacles
+obstacle_dim = 8.0;   % [m] size of obstacles
 minDist = obstacle_dim + 2*form_R + 4;          % minimum clearance between obstacles
 obstacles = spawn_obstacles(Nobs, map, obstacle_dim, minDist);
 
 %% Anchors
 % Choose N of anchors
-Nanchors = 3;
+Nanchors = 4;
 anchors = zeros(Nanchors,2);
 anchors(:,1) = map.W * rand(Nanchors,1);
 anchors(:,2) = map.H * rand(Nanchors,1);
@@ -137,29 +137,15 @@ for i=1:Nrobots
     Robots(i).omega = 0;
 end
 
-%% Initialisation for the relative distance estimate
-for i=1:Nrobots
-    Robots(i).rel_dist = zeros(Nrobots,1);
-    Robots(i).P_rel_dist = 0.5 * ones(Nrobots,1);
-    p_i = Robots(i).x_est(1:2);
-     for j = 1:Nrobots
-            if j == i
-                continue;
-            end
-            p_j = Robots(j).x_est(1:2);
-
-            Robots(i).rel_dist(j) = norm(p_i-p_j);
-     end
-end
-
 
 %% Controller gains and limits
 % Different weights assigned to the different tasks: formation keeping and
 % follow trajectory
 %% WEIGHTS
 w_form  = 1.0; % FORMATION TASK
-w_obs = 5;   % OBSTACLE AVOIDANCE
+w_obs = 10.0;   % OBSTACLE AVOIDANCE
 
+d_safe = 1.0;  % safety distance robot-obstacle [m]
 %% GAINS
 k_u   = 3.0;      % linear
 k_omega = 2.0;      % angular
@@ -255,26 +241,14 @@ for k = 2:K
             end
 
             pos_j = Robots(j).x_est(1:2);   % use estimated position of robot j
-            diff = pos_i - pos_j;
 
-            % Distance measured with Lidar:
-            lidar_std = 0.02; % Lidar std
-            dist_meas = norm(diff) + lidar_std * randn();
-            Robots(i) = relative_dist_KF(Robots(i), Robots(j), j, dist_meas, lidar_std^2, dt);
-            dij = Robots(i).rel_dist(j);            % actual distance between i and j
-            %dij = norm(diff);
+            diff = pos_i - pos_j;
+            dij = norm(diff);            % actual distance between i and j
 
             % compute circular-formation desired distance (chord length)
             k_sep = abs(i - j);
             k_sep = min(k_sep, Nrobots - k_sep);   % shortest wrap-around separation
             d_des_ij = norm(2 * form_R * sin(pi * k_sep / Nrobots));
-
-            if i == 1 && j==2
-                pos_i_real = Robots(i).x(1:2);
-                pos_j_real = Robots(j).x(1:2);
-                dist_real = norm(pos_i_real-pos_j_real);
-                dist_est = dij;
-            end
 
             % accumulate formation term
             u_form = u_form - (dij^2 - d_des_ij^2) * diff;
@@ -291,90 +265,64 @@ for k = 2:K
         end
 
 
-%% ----------- SIMPLE DISC-BASED AVOIDANCE CONTROLLER --------------
+%% ----------------- GLOBAL OBSTACLE AVOIDANCE (robust exponential repulsion) -------------
 
-safe_margin = 5;                       % extra clearance around formation
-R_virt = form_R + safe_margin;         % virtual radius of the formation
-eps_dist = 1e-6;
+% PARAMETERS
+safe_dist = form_R + 5;    % minimum distance to obstacle surface
+w_att = 2.0;                 % weight of attractive term
+w_rep = 5.0;                 % weight of repulsive term
+w_tan = 0.0;                 % weight of tangential sliding term
+rep_scale = 10.0;            % scale factor for exponential repulsion
+eps_dist = 1e-6;             % small value to avoid division by zero
 
-% ----- attractive direction -----
-goal_vec = cd - Package.c;
-if norm(goal_vec) < eps_dist
-    u_att = [0;0];
-else
-    u_att = goal_vec / norm(goal_vec);
-end
+repulsive = [0;0];           % sum of repulsive forces
+tangential = [0;0];          % sum of tangential sliding forces
+any_near = false;
 
-% ----- find nearest obstacle (distance to virtual disc) -----
-nearest_d = Inf; nearest_dir = [0;0];
 for o = 1:numel(obstacles)
     obs = obstacles(o);
-    vec = Package.c - obs.state;
-    d_surface = pointObstacleDistance(Package.c, obs); % >0 outside
-    d_eff = d_surface - R_virt;                        % clearance wrt virtual disc
-    if d_eff < nearest_d
-        nearest_d = d_eff;
-        nearest_dir = vec / max(norm(vec), eps_dist);
+    vec_to_package = Package.c - obs.state;           % vector from obstacle center to package
+    dist_to_center = norm(vec_to_package) + eps_dist;
+    dist_to_surface = pointObstacleDistance(Package.c, obs); % >0 outside, <0 inside
+
+    % only consider obstacles within safety margin
+    if dist_to_surface > safe_dist
+        continue;
     end
+    any_near = true;
+
+    % unit vector away from obstacle
+    rep_dir = vec_to_package / dist_to_center;
+
+    % exponential repulsion: very strong as distance -> 0
+    % influence = scale * (exp(1/(distance + eps)) - 1)
+    if dist_to_surface <= 0
+        % inside obstacle → push very strongly
+        influence = 1e3;
+    else
+        influence = rep_scale * (exp(1 / max(dist_to_surface, eps_dist)) - 1);
+    end
+    repulsive = repulsive + influence * rep_dir;
+
+    % tangential sliding to prevent deadlocks
+    perp = [-rep_dir(2); rep_dir(1)];
+    tan_influence = exp(-dist_to_surface / safe_dist);  % stronger when closer
+    tangential = tangential + tan_influence * perp;
 end
 
-% ----- avoidance logic -----
-if nearest_d > 0
-    % no collision threat: just go to goal
-    u_des_dir = u_att;
+% combine attractive, repulsive, and tangential components
+if ~any_near
+    u_obs_total = u_att_unit;  % no obstacle nearby → pure attractive
 else
-    % collision: project goal direction onto tangent of obstacle
-    tangent = [-nearest_dir(2); nearest_dir(1)];
-    if dot(tangent,u_att(:,1)) < 0
-        tangent = -tangent;
+    u_obs_total = w_att*u_att_unit + w_rep*repulsive + w_tan*tangential;
+    if norm(u_obs_total) < eps_dist
+        u_obs_total = -u_att_unit;  % fallback if forces cancel
     end
-    % blend between sliding along tangent and pushing away
-    slide_weight = 0.8; 
-    u_des_dir = slide_weight * tangent + (1-slide_weight) * nearest_dir;
 end
 
-% normalize safe
-u_obs_global = u_des_dir / max(norm(u_des_dir), eps_dist);
-
-% ----- final input: blend with formation control -----
-u_des = w_form * u_form + w_obs * u_obs_global;
-
-%         %% ----------------- VORONOI-LIKE OBSTACLE AVOIDANCE -----------------
-% num_candidates = 60;       % number of directions to sample
-% max_angle = pi/2;          % ±90° search cone around goal direction
-% alpha = 1.0;               % weight on angular deviation
-% beta  = 5.0;               % weight on obstacle clearance
-% 
-% goal_angle = atan2(u_att_unit(2), u_att_unit(1));
-% angles = linspace(goal_angle - max_angle, goal_angle + max_angle, num_candidates);
-% 
-% best_cost = Inf;
-% best_dir = u_att_unit; % default: go to goal
-% 
-% for a = angles
-%     dir = [cos(a); sin(a)];
-% 
-%     % find clearance along this ray
-%     clearance = Inf;
-%     for o = 1:numel(obstacles)
-%         obs = obstacles(o);
-%         d_surface = pointObstacleDistance(Package.c, obs);
-%         clearance = min(clearance, d_surface);
-%     end
-% 
-%     % cost: small angle deviation is good, large clearance is good
-%     ang_dev = abs( wrapToPi(a - goal_angle) );
-%     cost = alpha * ang_dev + beta / max(clearance, 1e-3);
-% 
-%     if cost < best_cost
-%         best_cost = cost;
-%         best_dir = dir;
-%     end
-% end
-% 
-% u_obs_global = best_dir;    % chosen safe direction
-% u_des = w_form*u_form + w_obs*u_obs_global;
-
+% normalize and blend with formation control
+u_obs_global = u_obs_total / norm(u_obs_total);
+u_des = w_form*u_form + w_obs*u_obs_global;
 
         % conversione in unicycle
         theta_des = atan2(u_des(2), u_des(1));
@@ -418,18 +366,17 @@ u_des = w_form * u_form + w_obs * u_obs_global;
     if mod(k, 20) == 0
         disp(['Progress: ', num2str(k/K * 100), ' %']);
         disp(['Package state: ','x: ',num2str(Package.c(1)),'y: ',num2str(Package.c(2))])
-        disp(['Dist R.1-2, real: ', num2str(dist_real), ' est: ',num2str(dist_est), ' diff: ', num2str(norm(dist_real-dist_est))])
     end
 end
 
 
-fig = fig+1;
-figure(fig); clf; hold on;
-plot(linspace(0,Tfinal,K),trace_P)
-plot(linspace(0,Tfinal,K),trace_P);
-ylabel('Trace of Matrix P ');
-title('mean trace of Covariance Matrix over Time');
-grid on;
+% fig = fig+1;
+% figure(fig); clf; hold on;
+% plot(linspace(0,Tfinal,K),trace_P)
+% plot(linspace(0,Tfinal,K),trace_P);
+% ylabel('Trace of Matrix P ');
+% title('mean trace of Covariance Matrix over Time');
+% grid on;
 
 
 %% TO DO

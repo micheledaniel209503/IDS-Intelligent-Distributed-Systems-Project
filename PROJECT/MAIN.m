@@ -17,7 +17,17 @@ toRad = pi / 180; % Conversion factor from degrees to radians
 toDeg = 180 / pi; % Conversion factor from radians to degrees
 
 %% Parameters
-tolerance_on_lineup_form_radius = 0.3; % radial tolerance for the initial position of robots in lineup phase
+tolerance_on_lineup_form_radius = 0.4; % radial tolerance for the initial position of robots in lineup phase
+
+%% Control Parameters
+k_u   = 3.0;      % linear
+k_omega = 2.0;      % angular
+u_max = 1.0;         % m/s
+omega_max = 0.2;     % rad/s
+
+w_form  = 0.0; % FORMATION TASK
+w_att = 100.0; % TARGET TASK
+w_obs = 10.0;   % OBSTACLE AVOIDANCE
 
 %% Building the environment
 % --------DEFINITIONS---------
@@ -560,8 +570,24 @@ for k = 1:iter_sim
                 Robots(id).working_state = 't';
             end
         end
-    end
 
+        %% FORMATION + TARGET CONTROL
+        for id = robots_id_itemId_i
+            if Robots(id).working_state ~= 't'
+                break;
+            end
+            % SETTARE I PARAMETRI
+            % ALL'INIZIO!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+            u_formation = formation_control(Robots, robots_id_itemId_i, id, Packages(i).r, [map.W/1.05 map.H/1.05], w_form, w_att);
+            u_obs_avoidance = [0; 0]; % For now don't consider the obstacle avoidance
+            u_total = u_formation + u_obs_avoidance;
+
+            [u, omega] = conversion_to_unicycle([map.W/1.05 map.H/1.05], Robots(id).state_est(3), k_u, k_omega, u_max, omega_max);
+
+            Robots(id).u = u;
+            Robots(id).omega = omega;
+        end
+    end
     % robot control + dynamics
     for j = 1:numel(Robots_voronoi)
         id = Robots_voronoi(j);
@@ -572,13 +598,10 @@ for k = 1:iter_sim
             [u, omega] = ROB_control(Robots(id).state_est, ci, ...
                                      u_sat, omega_sat, Kp_u, Kp_theta, ...
                                      r_goal, theta_goal);
+
+            Robots(id).u = u;
+            Robots(id).omega = omega;
         end
-        if Robots(j).working_state == 't'
-            u=0;
-            omega=0;
-        end
-        Robots(id).u = u;
-        Robots(id).omega = omega;
         
         % dyna
         %Robots(id).state = fun(Robots(id).state, u, omega, dt);
