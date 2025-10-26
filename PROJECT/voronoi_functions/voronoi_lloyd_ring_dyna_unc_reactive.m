@@ -87,7 +87,7 @@ function [L, areas, masses, centroids, Phi, Wrs_set] = voronoi_lloyd_ring_dyna_u
             case 't' % transportation TO BE TESTED
                     mu = robot_pos_est(k,:);
                     sigma_transport = 1.5; % any value small enough will do fine
-                    Phi(:,:,k) = gauss2d(X, Y, mu, sigma_transport^2*eye(2)); % centroid --> your position
+                    Phi(:,:,k) = 0; % centroid --> your position
 
             case 'f' % free
                     Phi(:,:,k) = ones(m,n);  % uniform pdf --> optimal coverage (classic Voronoi)
@@ -121,7 +121,7 @@ function [L, areas, masses, centroids, Phi, Wrs_set] = voronoi_lloyd_ring_dyna_u
         M = sum(w(:)) * cell_area; % integral of Phi(x,y)*dxdy  =  sum(Phi)*dA
         masses(k) = M;
 
-            if M <= 1e-50 % !!! this has to be fine tuned !!! if mass is null --> no centroid
+            if M <= 1e-50 || lower(Robots(idx_use(k)).working_state)=='t'% !!! this has to be fine tuned !!! if mass is null --> no centroid
                 centroids(k,:) = [NaN NaN];
             else % define centroid
                 Cx = sum(sum(X .* w)) * cell_area / M; % look at theory

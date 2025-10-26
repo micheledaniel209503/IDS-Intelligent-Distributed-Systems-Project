@@ -17,7 +17,7 @@ toRad = pi / 180; % Conversion factor from degrees to radians
 toDeg = 180 / pi; % Conversion factor from radians to degrees
 
 %% Parameters
-tolerance_on_lineup_form_radius = 0.4; % radial tolerance for the initial position of robots in lineup phase
+tolerance_on_lineup_form_radius = 0.2; % radial tolerance for the initial position of robots in lineup phase
 
 %% Control Parameters
 k_u   = 3.0;      % linear
@@ -25,9 +25,15 @@ k_omega = 2.0;      % angular
 u_max = 1.0;         % m/s
 omega_max = 0.2;     % rad/s
 
-w_form  = 0.0; % FORMATION TASK
-w_att = 100.0; % TARGET TASK
+w_form  = 0.1; % FORMATION TASK
+w_att = 5.0; % TARGET TASK
+w_damp = 0.0;
 w_obs = 10.0;   % OBSTACLE AVOIDANCE
+
+%% Simulation parameters
+dt = 0.1; % [s] time step
+T_sim = 500; % [s] sim time
+iter_sim = T_sim / dt; % Calculate the number of iterations
 
 %% Building the environment
 % --------DEFINITIONS---------
@@ -165,7 +171,7 @@ for t = 1:n_msg
     % Distinguish the case when we have only 2 values, if we keep the
     % standard algorithm, the solution oscillates
     if nNonNaN == 2
-        Qi_sub = 1/2 * ones(2)
+        Qi_sub = 1/2 * ones(2);
     else
         for j = 1:nNonNaN
             if j ~= i_local
@@ -274,7 +280,7 @@ close all; % close previous figures
 
 
 
-%  --------------------------------
+%  --------------------------------------------------------------------------------------------------------
 %% ORGANIZE TRANSPORTATION
 % Based on surface area of the package --> n° robots needed
 Packages(1).s = 20; % [m^2] surface area of the package
@@ -311,10 +317,6 @@ disp([radius]);
 Packages(1).r = radius;
 
 %% LLOYD-VORONOI simulation setup parameters
-% Simulation parameters
-dt = 0.1; % [s] time step
-T_sim = 100; % [s] sim time
-iter_sim = T_sim / dt; % Calculate the number of iterations
 disp(['Simulation Setup...']);
 
 % map grid
@@ -437,7 +439,7 @@ for i = 1:length(Robots_voronoi)
     
 end
 
-trace_P = zeros(iter_sim); % initialization;
+%trace_P = zeros(iter_sim); % initialization;
 
 %% LINEUP SIMULATION with SENSING RADIUS
 
@@ -516,7 +518,7 @@ for k = 1:iter_sim
         % Estimation of position and orientation using EKF (based on the last control input)
         [Robots(j).state_est, Robots(j).P] = EKF_function(Robots(j).state_est, Robots(j).u, Robots(j).omega, fun2, A, G, z, H, Robots(j).P, Q, R, dt);
         % Update the trace of the covariance matrix
-        trace_P(k) = trace_P(k) + trace(Robots(j).P);
+        %trace_P(k) = trace_P(k) + trace(Robots(j).P);
     end
 
     % compute Voronoi partitioning + centroids for each robot
@@ -556,7 +558,7 @@ for k = 1:iter_sim
             end
             
             % Check alignment for this robot
-            isAligned = isRobotAligned(Robots(id), Packages(i).state_est, Packages(i).r, tolerance_on_lineup_form_radius);
+            isAligned = isRobotAligned(Robots(id), Packages(i).state, Packages(i).r, tolerance_on_lineup_form_radius);
             % If even one robot is not aligned, stop checking further
             if ~isAligned
                 allAligned = false;
@@ -566,6 +568,7 @@ for k = 1:iter_sim
         
         % If all robots are aligned, switch their state to t
         if allAligned
+            disp('Robots Aligned, ready for transport!');
             for id = robots_id_itemId_i
                 Robots(id).working_state = 't';
             end
@@ -576,14 +579,11 @@ for k = 1:iter_sim
             if Robots(id).working_state ~= 't'
                 break;
             end
-            % SETTARE I PARAMETRI
-            % ALL'INIZIO!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-            u_formation = formation_control(Robots, robots_id_itemId_i, id, Packages(i).r, [map.W/1.05 map.H/1.05], w_form, w_att);
-            u_obs_avoidance = [0; 0]; % For now don't consider the obstacle avoidance
-            u_total = u_formation + u_obs_avoidance;
 
-            [u, omega] = conversion_to_unicycle([map.W/1.05 map.H/1.05], Robots(id).state_est(3), k_u, k_omega, u_max, omega_max);
-
+            p_des =  TRANSPORT_control(Robots, robots_id_itemId_i, id, Packages(i).r, [map.W/10, map.H/1.1], w_form, w_att, w_damp, u_max, dt);
+            [u, omega] = ROB_control(Robots(id).state_est, p_des(1,:), ...
+                                     u_sat, omega_sat, Kp_u, Kp_theta, ...
+                                     r_goal, theta_goal);
             Robots(id).u = u;
             Robots(id).omega = omega;
         end
@@ -594,7 +594,7 @@ for k = 1:iter_sim
         ci = centroids(j,:);
 
         % control
-        if Robots(j).working_state ~= 't'
+        if Robots(id).working_state ~= 't'
             [u, omega] = ROB_control(Robots(id).state_est, ci, ...
                                      u_sat, omega_sat, Kp_u, Kp_theta, ...
                                      r_goal, theta_goal);
@@ -603,9 +603,9 @@ for k = 1:iter_sim
             Robots(id).omega = omega;
         end
         
-        % dyna
+        % compute dynamics for each robot
         %Robots(id).state = fun(Robots(id).state, u, omega, dt);
-        Robots(id).state = fun2(Robots(id).state(1), Robots(id).state(2), Robots(id).state(3), u, omega, dt);
+        Robots(id).state = fun2(Robots(id).state(1), Robots(id).state(2), Robots(id).state(3), Robots(id).u, Robots(id).omega, dt);
 
         % wrap theta
         Robots(id).state(3) = wrap(Robots(id).state(3));

@@ -41,7 +41,7 @@ A = @(x, y, theta, vel, omega, dT) [1, 0, -vel * sin(theta) * dT; 0, 1, vel * co
 G = @(x, y, theta, vel, omega, dT)[ dT*cos(theta), 0; dT*sin(theta), 0; 0,  dT ];
 
 %% Simulation Parameters
-Ts = 0.01;            % timestep
+Ts = 0.05;            % timestep
 Tfinal = 300;           % total sim time (s)
 K = round(Tfinal/Ts);
 form_R = 2.5;           % formation radius around package centroid
@@ -96,7 +96,7 @@ minClearance = 7;   % [m] safety distance from obstacles
 
 
 %% Robots
-Nrobots = 4;
+Nrobots = 5;
 Robots(Nrobots,1) = rob();
 
 % Initial formation angles around the package
@@ -106,9 +106,9 @@ phi = linspace(0, 2*pi, Nrobots + 1); phi = phi(1:end-1);
 for i = 1:Nrobots
     Robots(i).id = i;
     Robots(i).x = zeros(3,1);
-    Robots(i).x(1) = Package.c(1) + form_R * cos(phi(i)) + 0.15*randn(); % initial X
-    Robots(i).x(2) = Package.c(2) + form_R * sin(phi(i)) + 0.15*randn(); % initial Y
-    Robots(i).x(3) = 0; % random heading------------------------------------------------------
+    Robots(i).x(1) = Package.c(1) + form_R * cos(phi(i)) + 0.4*rand(); % initial X
+    Robots(i).x(2) = Package.c(2) + form_R * sin(phi(i)) + 0.4*rand(); % initial Y
+    Robots(i).x(3) = 2*pi * randn(); % random heading------------------------------------------------------
 end
 
 %% Initialisation for the estimation algorithm (recursive least square)
@@ -142,7 +142,9 @@ end
 % Different weights assigned to the different tasks: formation keeping and
 % follow trajectory
 %% WEIGHTS
-w_form  = 1.0; % FORMATION TASK
+w_form  = 0; % FORMATION TASK
+w_att = 4;
+w_damp = 0;
 w_obs = 10.0;   % OBSTACLE AVOIDANCE
 
 d_safe = 1.0;  % safety distance robot-obstacle [m]
@@ -232,98 +234,69 @@ for k = 2:K
         %% Formation
     for i = 1:Nrobots
 
-        pos_i = Robots(i).x_est(1:2);  % use estimated positions for control
-
-        u_form = [0;0];
-        for j = 1:Nrobots
-            if j == i
-                continue;
-            end
-
-            pos_j = Robots(j).x_est(1:2);   % use estimated position of robot j
-
-            diff = pos_i - pos_j;
-            dij = norm(diff);            % actual distance between i and j
-
-            % compute circular-formation desired distance (chord length)
-            k_sep = abs(i - j);
-            k_sep = min(k_sep, Nrobots - k_sep);   % shortest wrap-around separation
-            d_des_ij = norm(2 * form_R * sin(pi * k_sep / Nrobots));
-
-            % accumulate formation term
-            u_form = u_form - (dij^2 - d_des_ij^2) * diff;
-        end
-        %% Target
-        % target drive toward desired centroid as before
-        %u_target = (cd + form_R * [cos(phi(i)),sin(phi(i))]' - pos_i);
-        % desired direction from package centroid to goal
-        u_att = cd - Package.c;
-        if norm(u_att) < 1e-8
-            u_att_unit = [1;0]; % arbitrary if exactly at goal
-        else
-            u_att_unit = u_att / norm(u_att);
-        end
+        u_form = formation_control(Robots, 1:Nrobots, i, form_R, goalPoint, w_form, w_att, w_damp);
 
 
-%% ----------------- GLOBAL OBSTACLE AVOIDANCE (robust exponential repulsion) -------------
+% %% ----------------- GLOBAL OBSTACLE AVOIDANCE (robust exponential repulsion) -------------
+% 
+% % PARAMETERS
+% safe_dist = form_R + 5;    % minimum distance to obstacle surface
+% w_att = 2.0;                 % weight of attractive term
+% w_rep = 5.0;                 % weight of repulsive term
+% w_tan = 0.0;                 % weight of tangential sliding term
+% rep_scale = 10.0;            % scale factor for exponential repulsion
+% eps_dist = 1e-6;             % small value to avoid division by zero
+% 
+% repulsive = [0;0];           % sum of repulsive forces
+% tangential = [0;0];          % sum of tangential sliding forces
+% any_near = false;
+% 
+% for o = 1:numel(obstacles)
+%     obs = obstacles(o);
+%     vec_to_package = Package.c - obs.state;           % vector from obstacle center to package
+%     dist_to_center = norm(vec_to_package) + eps_dist;
+%     dist_to_surface = pointObstacleDistance(Package.c, obs); % >0 outside, <0 inside
+% 
+%     % only consider obstacles within safety margin
+%     if dist_to_surface > safe_dist
+%         continue;
+%     end
+%     any_near = true;
+% 
+%     % unit vector away from obstacle
+%     rep_dir = vec_to_package / dist_to_center;
+% 
+%     % exponential repulsion: very strong as distance -> 0
+%     % influence = scale * (exp(1/(distance + eps)) - 1)
+%     if dist_to_surface <= 0
+%         % inside obstacle → push very strongly
+%         influence = 1e3;
+%     else
+%         influence = rep_scale * (exp(1 / max(dist_to_surface, eps_dist)) - 1);
+%     end
+%     repulsive = repulsive + influence * rep_dir;
+% 
+%     % tangential sliding to prevent deadlocks
+%     perp = [-rep_dir(2); rep_dir(1)];
+%     tan_influence = exp(-dist_to_surface / safe_dist);  % stronger when closer
+%     tangential = tangential + tan_influence * perp;
+% end
+% 
+% % combine attractive, repulsive, and tangential components
+% if ~any_near
+%     u_obs_total = u_att_unit;  % no obstacle nearby → pure attractive
+% else
+%     u_obs_total = w_att*u_att_unit + w_rep*repulsive + w_tan*tangential;
+%     if norm(u_obs_total) < eps_dist
+%         u_obs_total = -u_att_unit;  % fallback if forces cancel
+%     end
+% end
+% 
+% % normalize and blend with formation control
+% u_obs_global = u_obs_total / norm(u_obs_total);
+% u_des = w_form*u_form + w_obs*u_obs_global;
 
-% PARAMETERS
-safe_dist = form_R + 5;    % minimum distance to obstacle surface
-w_att = 2.0;                 % weight of attractive term
-w_rep = 5.0;                 % weight of repulsive term
-w_tan = 0.0;                 % weight of tangential sliding term
-rep_scale = 10.0;            % scale factor for exponential repulsion
-eps_dist = 1e-6;             % small value to avoid division by zero
-
-repulsive = [0;0];           % sum of repulsive forces
-tangential = [0;0];          % sum of tangential sliding forces
-any_near = false;
-
-for o = 1:numel(obstacles)
-    obs = obstacles(o);
-    vec_to_package = Package.c - obs.state;           % vector from obstacle center to package
-    dist_to_center = norm(vec_to_package) + eps_dist;
-    dist_to_surface = pointObstacleDistance(Package.c, obs); % >0 outside, <0 inside
-
-    % only consider obstacles within safety margin
-    if dist_to_surface > safe_dist
-        continue;
-    end
-    any_near = true;
-
-    % unit vector away from obstacle
-    rep_dir = vec_to_package / dist_to_center;
-
-    % exponential repulsion: very strong as distance -> 0
-    % influence = scale * (exp(1/(distance + eps)) - 1)
-    if dist_to_surface <= 0
-        % inside obstacle → push very strongly
-        influence = 1e3;
-    else
-        influence = rep_scale * (exp(1 / max(dist_to_surface, eps_dist)) - 1);
-    end
-    repulsive = repulsive + influence * rep_dir;
-
-    % tangential sliding to prevent deadlocks
-    perp = [-rep_dir(2); rep_dir(1)];
-    tan_influence = exp(-dist_to_surface / safe_dist);  % stronger when closer
-    tangential = tangential + tan_influence * perp;
-end
-
-% combine attractive, repulsive, and tangential components
-if ~any_near
-    u_obs_total = u_att_unit;  % no obstacle nearby → pure attractive
-else
-    u_obs_total = w_att*u_att_unit + w_rep*repulsive + w_tan*tangential;
-    if norm(u_obs_total) < eps_dist
-        u_obs_total = -u_att_unit;  % fallback if forces cancel
-    end
-end
-
-% normalize and blend with formation control
-u_obs_global = u_obs_total / norm(u_obs_total);
-u_des = w_form*u_form + w_obs*u_obs_global;
-
+        u_des = u_form;
         % conversione in unicycle
         theta_des = atan2(u_des(2), u_des(1));
         e_theta   = wrapToPi(theta_des - Robots(i).x_est(3));
