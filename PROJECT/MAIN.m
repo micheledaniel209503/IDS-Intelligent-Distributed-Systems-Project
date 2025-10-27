@@ -27,7 +27,7 @@ omega_max = 0.2;     % rad/s
 
 w_form  = 0.1; % FORMATION TASK
 w_att = 5.0; % TARGET TASK
-w_damp = 0.0;
+w_damp = 0.1;
 w_obs = 10.0;   % OBSTACLE AVOIDANCE
 
 %% Simulation parameters

@@ -1,33 +1,63 @@
 function p_des = TRANSPORT_control(Robots, ids_group, i_robot, form_R, target, w_form, w_att, w_damp, u_max, dt)
-%FORMATION_CONTROL_DAMPED_RELATIVE Formation control with relative velocity damping
-%
-%   Adds damping that penalizes relative velocity differences between robots
-%   to prevent oscillations and improve stability.
+    % INPUTS:
+    %   Robots     - structure array with fields: state_est = [x, y, theta], u = speed
+    %   ids_group  - list of robot IDs that belong to this formation
+    %   i_robot    - ID of the current robot being controlled
+    %   form_R     - desired formation radius
+    %   target     - [x; y] target position
+    %   w_form     - weight for formation term
+    %   w_att      - weight for attraction term
+    %   w_damp     - weight for damping term
+    %   u_max      - maximum control input magnitude
+    %   dt         - time step
+    %
+    % OUTPUT:
+    %   p_des      - desired next position [1x2] for robot i
 
+    %% Initialization
     Nrobots = length(ids_group);
     pos_i = Robots(i_robot).state_est(1:2);
-    pos_i = pos_i(:); % column vector
-    target = target(:); % column vector
+    pos_i = pos_i(:);
+    target = target(:);
 
-    %% --- Formation control term ---
+    %% Dynamic angular ordering of robots
+
+    positions = zeros(2, Nrobots);
+    for k = 1:Nrobots
+        j = ids_group(k);
+        positions(:, k) = Robots(j).state_est(1:2);
+    end
+
+    % centroid of the formation
+    center = mean(positions, 2);
+
+    % Compute angles of each robot around the center
+    angles = atan2(positions(2,:) - center(2), positions(1,:) - center(1));
+
+    % Sort robots counterclockwise by angle
+    [~, sort_idx] = sort(angles);
+    ids_group = ids_group(sort_idx);
+
+    %% --- Formation control initialization ---
     u_form = [0; 0];
-    u_damp = [0; 0];   % Initialize relative damping accumulator
+    u_damp = [0; 0];
 
-    % Get velocity of robot i
-    vel_i = compute_velocity_components(Robots(i_robot))'; 
+    % Velocity of current robot i
+    vel_i = compute_velocity_components(Robots(i_robot))';
 
+    %% --- Iterate over all other robots in the group ---
     for k = 1:Nrobots
         j = ids_group(k);
         if j == i_robot
             continue;
         end
 
-        % Positions and velocities of neighbor j
+        % Neighbor position and velocity
         pos_j = Robots(j).state_est(1:2);
-        pos_j = pos_j(:); % column vector
-        vel_j = compute_velocity_components(Robots(j))'; 
+        pos_j = pos_j(:);
+        vel_j = compute_velocity_components(Robots(j))';
 
-        % --- Formation control part ---
+        % Formation control
         diff = pos_i - pos_j;
         dij = norm(diff);
 
@@ -36,30 +66,29 @@ function p_des = TRANSPORT_control(Robots, ids_group, i_robot, form_R, target, w
         k_sep = abs(idx_i - idx_j);
         k_sep = min(k_sep, Nrobots - k_sep);
 
+        % Desired theorical distance for ring formation
         d_des_ij = 2 * form_R * sin(pi * k_sep / Nrobots);
+
         u_form = u_form - (dij^2 - d_des_ij^2) * diff;
 
-        % --- Relative damping part ---
-        rel_vel = vel_i - vel_j;   % velocity difference
-        rel_speed = norm(rel_vel);
-
-        if rel_speed > 0.01
-            damping_gain = min(1, rel_speed / 0.5);
-            u_damp = u_damp - damping_gain * rel_vel;
-        end
+        % Relative velocity damping
+        rel_vel = vel_i - vel_j;
+        u_damp = u_damp - rel_vel;
     end
-
-    %% --- Attraction control term ---
+    %% Attraction to target
     u_att = target - pos_i;
     u_att = u_att / (norm(u_att) + 0.01);
 
-    %% --- Weighted combination ---
+    %% Weighted control combination
     u = w_form * u_form + w_att * u_att + w_damp * u_damp;
-    p_des = pos_i + (dt/u_max) * u;
-    p_des = p_des(:)';  % row vector output
+
+    %% Position computation
+    p_des = pos_i + (dt / u_max) * u;
+    p_des = p_des(:)'; 
 
 end
 
+% COMPUTE_VELOCITY_COMPONENTS: Convert robot heading and speed to XY velocity
 function vel = compute_velocity_components(robot)
     theta = robot.state_est(3);
     u = robot.u;
