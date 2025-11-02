@@ -25,10 +25,10 @@ k_omega = 2.0;      % angular
 u_max = 1.0;         % m/s
 omega_max = 0.2;     % rad/s
 
-w_form  = 0.1; % FORMATION TASK
+w_form  = 0.2; % FORMATION TASK
 w_att = 5.0; % TARGET TASK
-w_damp = 0.1;
-w_obs = 10.0;   % OBSTACLE AVOIDANCE
+w_damp = 0.0;
+w_obs = 5.0;   % OBSTACLE AVOIDANCE
 
 %% Simulation parameters
 dt = 0.1; % [s] time step
@@ -52,6 +52,12 @@ zones.inbound.polygon = [
     map.W/2+zones.inbound.W/2 zones.inbound.H, 
     map.W/2-zones.inbound.W/2 zones.inbound.H
     ];
+%% Generate random obstacles in the grid
+Nobs = 4;
+obstacle_dim = 8.0; % [m] characteristic dimension of the obstacles (global)
+min_dist = 15+obstacle_dim; % [m] distance between centers of the obstacles
+
+Obstacles = spawn_obstacles(Nobs, map, obstacle_dim, min_dist);
 %% package spawn
 Npack = 1; % number of packages
 Packages(Npack,1) = pkg();
@@ -364,7 +370,7 @@ sigma_theta = 0.02; % [RAD] std on the orientation measure
 Q = 0.1*eye(2); % process noise covariance (set to zero if no uncertainty on the model)
 
 % Choose N of anchors
-Nanchors = 5;
+Nanchors = 4;
 anchors = zeros(Nanchors,2);
 anchors(:,1) = map.W * rand(Nanchors,1);
 anchors(:,2) = map.H * rand(Nanchors,1);
@@ -372,13 +378,6 @@ for a = 1:Nanchors
     ax = anchors(a,1); 
     ay = anchors(a,2);
 end
-
-%% Generate random obstacles in the grid
-Nobs = 3;
-obstacle_dim = 13.0; % [m] characteristic dimension of the obstacles (global)
-min_dist = 12; % [m] distance between centers of the obstacles
-
-Obstacles = spawn_obstacles(Nobs, map, obstacle_dim, min_dist);
 
 % Adapt the grid
 free_mask = true(size(X)); % initialization : free grid (no obstacles) --> matrix of ones
@@ -568,7 +567,6 @@ for k = 1:iter_sim
         
         % If all robots are aligned, switch their state to t
         if allAligned
-            disp('Robots Aligned, ready for transport!');
             for id = robots_id_itemId_i
                 Robots(id).working_state = 't';
             end
@@ -580,7 +578,7 @@ for k = 1:iter_sim
                 break;
             end
 
-            p_des =  TRANSPORT_control(Robots, robots_id_itemId_i, id, Packages(i).r, [map.W/10, map.H/1.1], w_form, w_att, w_damp, u_max, dt);
+            p_des =  TRANSPORT_control(Robots, robots_id_itemId_i, id, Packages(i).r, [map.W/10, map.H/1.1], w_form, w_att, w_obs, u_max, dt, Obstacles);
             [u, omega] = ROB_control(Robots(id).state_est, p_des(1,:), ...
                                      u_sat, omega_sat, Kp_u, Kp_theta, ...
                                      r_goal, theta_goal);

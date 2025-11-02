@@ -23,7 +23,7 @@ function O = spawn_obstacles(N, map, l, minDist)
             
             % Randomly choose type and position
             a = 0.3;
-            if rand <= 0%0.55
+            if rand <= 0.55
                 type = 'c';
                 x = l/2 + (map.W - l) * rand;
                 y = map.H*a + (map.H*(1-2*a) - l) * rand;
