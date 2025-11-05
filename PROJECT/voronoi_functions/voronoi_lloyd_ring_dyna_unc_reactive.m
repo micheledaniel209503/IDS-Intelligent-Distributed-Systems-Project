@@ -85,12 +85,11 @@ function [L, areas, masses, centroids, Phi, Wrs_set] = voronoi_lloyd_ring_dyna_u
                 Phi(:,:,k) = ring2d(X, Y, mu_pkg, R, sigma_k, 1e-15);
                 
             case 't' % transportation TO BE TESTED
-                    mu = robot_pos_est(k,:);
-                    sigma_transport = 1.5; % any value small enough will do fine
-                    Phi(:,:,k) = 0; % centroid --> your position
-
+                    Phi(:,:,k) = 0; % no centroid
             case 'f' % free
                     Phi(:,:,k) = ones(m,n);  % uniform pdf --> optimal coverage (classic Voronoi)
+            case 'i' % inbound attraction
+                    Phi(:,:,k) = inbound_attraction(X, Y, 0.4, 1);
             otherwise % error management
                 error("Unrecognized working state '%working_state' for Robots(%d).", working_state, idx_use(k));
         end

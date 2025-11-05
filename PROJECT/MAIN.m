@@ -52,6 +52,30 @@ zones.inbound.polygon = [
     map.W/2+zones.inbound.W/2 zones.inbound.H, 
     map.W/2-zones.inbound.W/2 zones.inbound.H
     ];
+% outbound zone
+zones.outbound.W = 20;
+zones.outbound.H = 10;
+zones.outbound1.polygon = [
+    0+5, map.H - zones.outbound.H;
+    zones.outbound.W + 5, map.H - zones.outbound.H;
+    zones.outbound.W + 5, map.H;
+    0+5, map.H
+];
+
+zones.outbound2.polygon = [
+    map.W/2 - zones.outbound.W/2, map.H - zones.outbound.H;
+    map.W/2 + zones.outbound.W/2, map.H - zones.outbound.H;
+    map.W/2 + zones.outbound.W/2, map.H;
+    map.W/2 - zones.outbound.W/2, map.H
+];
+
+zones.outbound3.polygon = [
+    map.W - zones.outbound.W - 5, map.H - zones.outbound.H;
+    map.W - 5, map.H - zones.outbound.H;
+    map.W - 5, map.H;
+    map.W - zones.outbound.W - 5, map.H
+];
+
 %% Generate random obstacles in the grid
 Nobs = 4;
 obstacle_dim = 8.0; % [m] characteristic dimension of the obstacles (global)
@@ -59,7 +83,8 @@ min_dist = 15+obstacle_dim; % [m] distance between centers of the obstacles
 
 Obstacles = spawn_obstacles(Nobs, map, obstacle_dim, min_dist);
 %% package spawn
-Npack = 1; % number of packages
+Npack = 2; % number of packages
+current_pkg = 1;
 Packages(Npack,1) = pkg();
 for k = 1:Npack
     Packages(k).id = k;
@@ -110,8 +135,8 @@ x0 = nan(Nrobots,2); % [x_est, y_est]
 distances = zeros(Nrobots, 1);
 
 for i = 1:Nrobots
-    dx = Packages(1).state(1) - Robots(i).state(1);
-    dy = Packages(1).state(2) - Robots(i).state(2);
+    dx = Packages(current_pkg).state(1) - Robots(i).state(1);
+    dy = Packages(current_pkg).state(2) - Robots(i).state(2);
     dist = sqrt(dx^2 + dy^2);
     distances(i) = dist;
 
@@ -206,11 +231,11 @@ end
 %disp(Q_tot);
 
 % assign to the package its own state estimate
-Packages(1).state_est = mean(xStore_sub(:,:,end),1);
+Packages(current_pkg).state_est = mean(xStore_sub(:,:,end),1);
 
-disp(['Real package position (x, y): ', num2str(Packages(1).state(1)), '  ', num2str(Packages(1).state(2))]);
+disp(['Real package position (x, y): ', num2str(Packages(current_pkg).state(1)), '  ', num2str(Packages(current_pkg).state(2))]);
 disp(['Est. package position (x, y): ', num2str(xStore_sub(1,1,end)), '  ',num2str(xStore_sub(1,2,end))]);
-disp(['error (distance) [cm]: ', num2str(100*sqrt((Packages(1).state(1)-xStore_sub(1,1,end))^2+(Packages(1).state(2)-xStore_sub(1,2,end))^2))])
+disp(['error (distance) [cm]: ', num2str(100*sqrt((Packages(current_pkg).state(1)-xStore_sub(1,1,end))^2+(Packages(current_pkg).state(2)-xStore_sub(1,2,end))^2))])
 
 
 
@@ -229,7 +254,7 @@ plot(S(:,1), S(:,2), 'ko', 'MarkerFaceColor','w');
 %text([Robots.state(1)]+1,[Robots.state(2)]+1,string(1:Nrobots))
 
 % Package true position
-hPkg = plot(Packages(1).state(1),Packages(1).state(2),'rs','MarkerFaceColor','r','MarkerSize',10);
+hPkg = plot(Packages(current_pkg).state(1),Packages(current_pkg).state(2),'rs','MarkerFaceColor','r','MarkerSize',10);
 
 % Final consensus estimates (only those who participated)
 hEst = plot(xStore(:,1,end),xStore(:,2,end),'bo','MarkerFaceColor','b');
@@ -257,7 +282,7 @@ if nNonNaN >= 1
         plot(iterations, squeeze(xStore_sub(k,1,:)), 'LineWidth', 1.5);
     end
     % Add true X value as reference line
-    yline(Packages(1).state(1), 'k--', 'LineWidth', 2, 'DisplayName','True X');
+    yline(Packages(current_pkg).state(1), 'k--', 'LineWidth', 2, 'DisplayName','True X');
 
     xlabel('Iteration (message step)');
     ylabel('Estimate x (coordinate)');
@@ -271,7 +296,7 @@ if nNonNaN >= 1
         plot(iterations, squeeze(xStore_sub(k,2,:)), 'LineWidth', 1.5);
     end
     % Add true Y value as reference line
-    yline(Packages(1).state(2), 'k--', 'LineWidth', 2, 'DisplayName','True Y');
+    yline(Packages(current_pkg).state(2), 'k--', 'LineWidth', 2, 'DisplayName','True Y');
 
     xlabel('Iteration (message step)');
     ylabel('Estimate y (coordinate)');
@@ -289,11 +314,11 @@ close all; % close previous figures
 %  --------------------------------------------------------------------------------------------------------
 %% ORGANIZE TRANSPORTATION
 % Based on surface area of the package --> n° robots needed
-Packages(1).s = 20; % [m^2] surface area of the package
+Packages(current_pkg).s = 20; % [m^2] surface area of the package
 robot_sc = 4; % [m^2] surface capacity of a robot
 
 disp('--- Organizing package transportation ---');
-RN = ceil(Packages(1).s / robot_sc);
+RN = ceil(Packages(current_pkg).s / robot_sc);
 disp(['Robots needed to carry package 1: ', num2str(RN)])
 
 % Which robots will go? The ones that are closer
@@ -306,7 +331,7 @@ Robots_selected_id = sortedIndices(1:RN);
 
 % Associate the package to the robots, using the field item_id
 for i=1:length(Robots_selected_id)
-    Robots(Robots_selected_id(i)).item_id = 1; % change with more than one package
+    Robots(Robots_selected_id(i)).item_id = current_pkg; % change with more than one package
 end
 
 disp('Indices of robots selected to carry the package: '); 
@@ -316,11 +341,31 @@ for j = 1:length(Robots)
     Robots(j).state(3) = 0; % [rad] set robot's orientation to 0
 end
 
-radius = ceil(sqrt(Packages(1).s / pi)*1.5); % compute radius from Packages(1).s circular surface
+radius = ceil(sqrt(Packages(current_pkg).s / pi)*1.5); % compute radius from Packages(current_pkg).s circular surface
 
 disp('Radius of the package ');
 disp([radius]);
-Packages(1).r = radius;
+Packages(current_pkg).r = radius;
+
+%% TARGET of the package, in the OUTBOUND zone
+outbound_id = randi([1, 3]); % randomly select an outbound zone
+if outbound_id == 1
+    zones.outbound = zones.outbound1;
+elseif outbound_id == 2
+    zones.outbound = zones.outbound2;
+elseif outbound_id == 3
+    zones.outbound = zones.outbound3;
+end
+[x,y] = spawn_target(zones.outbound);
+Packages(current_pkg).target = [x, y];
+
+figure('Color','w'); hold on; axis equal;
+fill(map.polygon(:,1), map.polygon(:,2), [0.95 0.95 0.95], 'EdgeColor','k');
+fill(zones.inbound.polygon(:,1), zones.inbound.polygon(:,2), 'b', 'FaceAlpha', 0.3);
+fill(zones.outbound.polygon(:,1), zones.outbound.polygon(:,2), 'r', 'FaceAlpha', 0.3);
+plot(Packages(current_pkg).target(1), Packages(current_pkg).target(2), 'ro', 'MarkerSize', 10, 'MarkerFaceColor', 'r');
+plot(Packages(current_pkg).state(1), Packages(current_pkg).state(2), 'bo', 'MarkerSize', 10, 'MarkerFaceColor', 'b');
+xlabel('x'); ylabel('y'); title('Inbound (blue) / Outbound (red)');
 
 %% LLOYD-VORONOI simulation setup parameters
 disp(['Simulation Setup...']);
@@ -350,11 +395,11 @@ wrap = @(a) atan2(sin(a),cos(a));
 traj = zeros(iter_sim,3,numel(Robots_selected_id));  % log
 
 %% Debugging the pdfs
-ring_pdf = ring2d(X, Y, Packages(1).state, Packages(1).r, 2, 1e-3);
+ring_pdf = ring2d(X, Y, Packages(current_pkg).state, Packages(current_pkg).r, 2, 1e-3);
 figure
 surf(xv,yv,ring_pdf); shading interp; colorbar;
 
-% opts = struct('logscale', true, 'mode','ring', 'mu_pkg', mu_pkg, 'R', Packages(1).r);
+% opts = struct('logscale', true, 'mode','ring', 'mu_pkg', mu_pkg, 'R', Packages(current_pkg).r);
 % figure; plot_phi_debug(Phi, X, Y, L, Robots, idx_use, centroids, opts);
 %% INTRODUCING UNCERTAINTY
 % let's introduce uncertainty and use the EKF
@@ -406,19 +451,8 @@ end
 for i = 1:length(Robots_selected_id)
     idx = Robots_selected_id(i);
     Robots(idx).working_state = 'r'; % ring working state test
-    Robots(idx).target = Packages(1).state(1:2);
+    Robots(idx).target = Packages(current_pkg).state(1:2);
 end
-
-% Select two robots that are NOT in Robots_selected_id and send them on two
-% points
-Robots_unselected_id = setdiff(1:Nrobots, Robots_selected_id);
-idx1 = Robots_unselected_id(1);
-idx2 = Robots_unselected_id(end);
-Robots(idx1).working_state = 'p';
-Robots(idx2).working_state = 'p';
-Robots(idx1).target = [70, 70];
-Robots(idx2).target = [80, 10];
-
 
 %% Initialisation for the estimation algorithm (recursive least square)
 for i = 1:length(Robots_voronoi)
@@ -442,17 +476,19 @@ end
 
 %% LINEUP SIMULATION with SENSING RADIUS
 
-disp('--- STARTING LINEUP...');
+disp('--- STARTING FIRST DELIVERY...');
 
 USEREACTIVE = true;   % flag: if false --> use standard voronoi (no cutting for the cells, no obstacle avoidance)
-DRAWCONTOUR = true;   % flag: draw contours of the voronoi cells
+DRAWCONTOUR = false;   % flag: draw contours of the voronoi cells
 rsense      = 10.0;  % [m] sensing radius for the robots (can be reduced in order to manage the collision avoidance in a different way)
 
 for i=1:numel(Robots)
     Robots(i).sr = rsense;
 end
 
-[L, areas, masses, centroids, Phi, Wrs_set] = voronoi_lloyd_ring_dyna_unc_reactive(Robots, Robots_voronoi, X, Y, free_mask, sigma_lineup, sigma_ring, Packages(1).r, USEREACTIVE);
+center_pkg = NaN(Npack, 2);
+
+[L, areas, masses, centroids, Phi, Wrs_set] = voronoi_lloyd_ring_dyna_unc_reactive(Robots, Robots_voronoi, X, Y, free_mask, sigma_lineup, sigma_ring, Packages(current_pkg).r, USEREACTIVE);
 
 % plot
 RN   = numel(Robots_voronoi);
@@ -470,27 +506,40 @@ if DRAWCONTOUR == true
     end
 end
 hold on
+    
+% inbound/outbound polygons
+fill(zones.inbound.polygon(:,1),  zones.inbound.polygon(:,2),  'b', 'FaceAlpha', 0.1, 'EdgeColor','none');
+fill(zones.outbound1.polygon(:,1), zones.outbound1.polygon(:,2), 'r', 'FaceAlpha', 0.1, 'EdgeColor','none');
+fill(zones.outbound2.polygon(:,1), zones.outbound2.polygon(:,2), 'r', 'FaceAlpha', 0.1, 'EdgeColor','none');
+fill(zones.outbound3.polygon(:,1), zones.outbound3.polygon(:,2), 'r', 'FaceAlpha', 0.1, 'EdgeColor','none');
 
-    % plot stuff
-    hRob  = gobjects(RN,1);
-    hCent = gobjects(RN,1);
-    center = Packages(1).state(1:2); % plot ring
-    tt = linspace(0, 2*pi, 361);
-    xr = center(1) + Packages(1).r*cos(tt);
-    yr = center(2) + Packages(1).r*sin(tt);
-    for j = 1:RN % initial step
-        id = Robots_voronoi(j);
-        p  = Robots(id).state(1:2);
-        hRob(j)  = plot(p(1), p(2), 'o', 'MarkerSize',6, ...
-                        'MarkerFaceColor',cmap(j,:), 'Color','k');
-        hCent(j) = plot(NaN, NaN, 'r+', 'MarkerSize',10, 'LineWidth',1.2);
-        hRing = plot(xr, yr, 'k--', 'LineWidth', 1);
-        hPkg = plot(center(1), center(2), 'bs', 'MarkerSize', 10);
-    end
+% plot handles
+hRob  = gobjects(RN,1);
+hCent = gobjects(RN,1);
+hPkg  = gobjects(Npack,1);
+hRing = gobjects(Npack,1);
+hTrgt = gobjects(Npack,1);
 
-    % refresh plot every iteration
-    refresh_every = 1;          % robot/centrois
-    refresh_contours_every = 20; % contours of Wrs
+% initialize
+for j = 1:RN
+    id = Robots_voronoi(j);
+    p  = Robots(id).state(1:2);
+    hRob(j)  = plot(p(1), p(2), 'o', 'MarkerSize',6, 'MarkerFaceColor',cmap(j,:), 'Color','k');
+    hCent(j) = plot(NaN, NaN, 'r+', 'MarkerSize',10, 'LineWidth',1.2);
+end
+
+tt   = linspace(0, 2*pi, 361); % ring plot
+
+xr = Packages(current_pkg).state_est(1) + Packages(current_pkg).r*cos(tt);
+yr = Packages(current_pkg).state_est(2) + Packages(current_pkg).r*sin(tt);
+hRing(current_pkg) = plot(xr, yr, 'k--', 'LineWidth', 1);
+hPkg(current_pkg)  = plot(xr, yr, 'bs', 'MarkerSize', 10, 'MarkerFaceColor','b');
+hTrgt(current_pkg) = plot(Packages(current_pkg).target(1), Packages(current_pkg).target(2), 'bo', 'MarkerSize', 10);
+
+
+% refresh plot every iteration
+refresh_every = 1;          % robot/centrois
+refresh_contours_every = 20; % contours of Wrs
 
 
 for k = 1:iter_sim
@@ -523,69 +572,86 @@ for k = 1:iter_sim
     % compute Voronoi partitioning + centroids for each robot
     [L, areas, masses, centroids, Phi, Wrs_set] = voronoi_lloyd_ring_dyna_unc_reactive( ...
         Robots, Robots_voronoi, X, Y, free_mask, ...
-        sigma_lineup, sigma_ring, Packages(1).r, USEREACTIVE);
+        sigma_lineup, sigma_ring, Packages(current_pkg).r, USEREACTIVE);
 
-    % check the robots lineup for every package
-    for i = 1:Npack
-        % Get all robots carrying package i
-        robots_id_itemId_i = [];  % initialize empty list
+    % check the robots lineup
+    % Get all robots carrying package i
+    robots_id_itemId_i = [];  % initialize empty list
 
-        for r = 1:length(Robots)
-            % Skip robots with empty or NaN item_id
-            if isempty(Robots(r).item_id) || isnan(Robots(r).item_id)
-                continue;
-            end
-        
-            % Check if this robot carries the i-th package
-            if Robots(r).item_id == i
-                robots_id_itemId_i = [robots_id_itemId_i, Robots(r).id];
-            end
-        end
-
-        % Skip if no robots are assigned to this package
-        if isempty(robots_id_itemId_i)
+    for r = 1:length(Robots)
+        % Skip robots with empty or NaN item_id
+        if isempty(Robots(r).item_id) || isnan(Robots(r).item_id)
             continue;
         end
-        
-        % Check alignment for each robot
-        allAligned = true; 
-        
-        for id = robots_id_itemId_i
-            % Skip if robot is already in transport phase
-            if Robots(id).working_state == 't'
-                continue;
-            end
-            
-            % Check alignment for this robot
-            isAligned = isRobotAligned(Robots(id), Packages(i).state, Packages(i).r, tolerance_on_lineup_form_radius);
-            % If even one robot is not aligned, stop checking further
-            if ~isAligned
-                allAligned = false;
-                break;
-            end
-        end
-        
-        % If all robots are aligned, switch their state to t
-        if allAligned
-            for id = robots_id_itemId_i
-                Robots(id).working_state = 't';
-            end
-        end
 
-        %% FORMATION + TARGET CONTROL
-        for id = robots_id_itemId_i
-            if Robots(id).working_state ~= 't'
-                break;
-            end
-
-            p_des =  TRANSPORT_control(Robots, robots_id_itemId_i, id, Packages(i).r, [map.W/10, map.H/1.1], w_form, w_att, w_obs, u_max, dt, Obstacles);
-            [u, omega] = ROB_control(Robots(id).state_est, p_des(1,:), ...
-                                     u_sat, omega_sat, Kp_u, Kp_theta, ...
-                                     r_goal, theta_goal);
-            Robots(id).u = u;
-            Robots(id).omega = omega;
+        % Check if this robot carries the i-th package
+        if Robots(r).item_id == current_pkg
+            robots_id_itemId_i = [robots_id_itemId_i, Robots(r).id];
         end
     end
+
+    % Skip if no robots are assigned to this package
+    if isempty(robots_id_itemId_i)
+        continue;
+    end
+
+    % Check alignment for each robot
+    allAligned = true;
+
+    for id = robots_id_itemId_i
+        % Skip if robot is already in transport phase
+        if Robots(id).working_state == 't'
+            continue;
+        end
+
+        % Check alignment for this robot
+        isAligned = isRobotAligned(Robots(id), Packages(current_pkg).state, Packages(current_pkg).r, tolerance_on_lineup_form_radius);
+        % If even one robot is not aligned, stop checking further
+        if ~isAligned
+            allAligned = false;
+            break;
+        end
+    end
+
+    % If all robots are aligned, switch their state to t
+    if allAligned
+        for id = robots_id_itemId_i
+            Robots(id).working_state = 't';
+        end
+    end
+
+    %% FORMATION + TARGET CONTROL
+    for id = robots_id_itemId_i
+        if Robots(id).working_state ~= 't'
+            break;
+        end
+
+        [p_des, center] =  TRANSPORT_control(Robots, robots_id_itemId_i, id, Packages(current_pkg).r, Packages(current_pkg).target, w_form, w_att, w_obs, u_max, dt, Obstacles);
+        [u, omega] = ROB_control(Robots(id).state_est, p_des(1,:), ...
+            u_sat, omega_sat, Kp_u, Kp_theta, ...
+            r_goal, theta_goal);
+        Robots(id).u = u;
+        Robots(id).omega = omega;
+    end
+
+    if (exist('center','var') && all(isfinite(center)))
+        center_pkg(current_pkg,:) = center(:).'; % package position
+        Packages(current_pkg).state_est = center_pkg(current_pkg,:);
+    end
+    % check delivery
+    tol_target = max(Packages(current_pkg).r - 1, 1.0); % tolerance on distance [m]
+    delivered = check_delivered(Packages(current_pkg).state_est, Packages(current_pkg).target, zones.outbound.polygon, tol_target);
+
+    if delivered
+        disp('--- FIRST PACKAGE HAS BEEN DELIVERED!');
+        Packages(current_pkg).delivered = true;
+        % opzionale: marker verde sul target
+        plot(Packages(current_pkg).target(1), Packages(current_pkg).target(2), 'gp', 'MarkerSize',12, 'MarkerFaceColor','g');
+        drawnow;
+        break;  % exit current simulation
+    end
+
+
     % robot control + dynamics
     for j = 1:numel(Robots_voronoi)
         id = Robots_voronoi(j);
@@ -613,6 +679,7 @@ for k = 1:iter_sim
         if mod(k, refresh_every) == 0
             perc = 100*k/iter_sim;
             set(hTitle, 'String', sprintf('SIMULATION (WITH UNCERTAINTIES): %.1f%%', perc));
+
             % robots + centroids
             for j = 1:RN
                 id = Robots_voronoi(j);
@@ -620,6 +687,15 @@ for k = 1:iter_sim
                 set(hRob(j), 'XData', px, 'YData', py); % robot marker
                 cx = centroids(j,1); cy = centroids(j,2);
                 set(hCent(j), 'XData', cx, 'YData', cy);
+            end
+
+            % package + ring
+            cx = Packages(current_pkg).state_est(1); cy = Packages(current_pkg).state_est(2);
+            if all(isfinite([cx,cy]))
+                set(hPkg(current_pkg), 'XData', cx, 'YData', cy);
+                xr = cx + Packages(current_pkg).r*cos(tt);
+                yr = cy + Packages(current_pkg).r*sin(tt);
+                set(hRing(current_pkg), 'XData', xr, 'YData', yr);
             end
     
             if (mod(k, refresh_contours_every) == 0 && DRAWCONTOUR == true)
@@ -638,4 +714,11 @@ for k = 1:iter_sim
         end
 end
 
-disp('--- LINEUP ENDED !');
+if delivered 
+    disp('--- FIRST DELIVERY CONCLUDED!');
+    disp('--- STARTING A NEW DELIVERY...');
+else
+    fprintf(2, '--- !!!FIRST DELIVERY FAIL!!!\n');
+end
+
+
