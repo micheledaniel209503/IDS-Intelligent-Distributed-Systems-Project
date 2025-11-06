@@ -122,7 +122,7 @@ end
 
 % Robot sensing radius (for the consensus)
 for i=1:Nrobots
-    Robots(i).sr = 15;
+    Robots(i).sr = 18;
 end
 % Number of messages exchanged
 n_msg = 12 ;
@@ -145,7 +145,7 @@ free_mask = true(size(X)); % free grid (no obstacles) --> matrix of ones
 % VORONOI control parameters
 Robots_voronoi = [Robots(:).id]'; % all robots in the tasselation
 sigma_ring = 1.25;
-sigma_lineup = 1.5;
+sigma_point = 1.5;
 sigma_transport = 1.0;
 u_sat = 3/3.6; % [m/s]
 omega_sat = 30*toRad; % [rad/s]
@@ -217,6 +217,10 @@ for pkg_i = 1:Npack
     current_pkg = pkg_i;
     
     % Initial measure of package position (robots only if they see it)
+    % Robot sensing radius (for the consensus)
+    for i=1:Nrobots
+        Robots(i).sr = 18;
+    end
     x0 = nan(Nrobots,2); % [x_est, y_est]
     distances = zeros(Nrobots, 1);
 
@@ -391,9 +395,7 @@ for pkg_i = 1:Npack
     end
 
     %% --------------------------------
-    close all; % close previous figures
-
-
+    
 
 
 
@@ -493,11 +495,11 @@ for pkg_i = 1:Npack
 
     %% LINEUP SIMULATION with SENSING RADIUS
 
-    disp('--- STARTING FIRST DELIVERY...');
+    disp('--- STARTING A NEW DELIVERY...');
 
     USEREACTIVE = true;   % flag: if false --> use standard voronoi (no cutting for the cells, no obstacle avoidance)
     DRAWCONTOUR = false;   % flag: draw contours of the voronoi cells
-    rsense      = 10.0;  % [m] sensing radius for the robots (can be reduced in order to manage the collision avoidance in a different way)
+    rsense      = 8.0;  % [m] sensing radius for the robots (can be reduced in order to manage the collision avoidance in a different way)
 
     for i=1:numel(Robots)
         Robots(i).sr = rsense;
@@ -505,7 +507,7 @@ for pkg_i = 1:Npack
 
     center_pkg = NaN(Npack, 2);
 
-    [L, areas, masses, centroids, Phi, Wrs_set] = voronoi_lloyd_ring_dyna_unc_reactive(Robots, Robots_voronoi, X, Y, free_mask, sigma_lineup, sigma_ring, Packages(current_pkg).r, USEREACTIVE);
+    [L, areas, masses, centroids, Phi, Wrs_set] = voronoi_lloyd_ring_dyna_unc_reactive(Robots, Robots_voronoi, X, Y, free_mask, sigma_point, sigma_ring, Packages(current_pkg).r, USEREACTIVE);
 
     % plot
     RN   = numel(Robots_voronoi);
@@ -558,9 +560,10 @@ for pkg_i = 1:Npack
     refresh_every = 1;          % robot/centrois
     refresh_contours_every = 20; % contours of Wrs
 
+clear center
+disp('--- STARTING A NEW DELIVERY...');
 
-    for k = 1:iter_sim
-
+for k = 1:iter_sim
         % state estimation
         for j = 1:numel(Robots_voronoi)
             % Measure of distances wrt anchors and orientation
@@ -589,7 +592,7 @@ for pkg_i = 1:Npack
         % compute Voronoi partitioning + centroids for each robot
         [L, areas, masses, centroids, Phi, Wrs_set] = voronoi_lloyd_ring_dyna_unc_reactive( ...
             Robots, Robots_voronoi, X, Y, free_mask, ...
-            sigma_lineup, sigma_ring, Packages(current_pkg).r, USEREACTIVE);
+            sigma_point, sigma_ring, Packages(current_pkg).r, USEREACTIVE);
 
         % check the robots lineup
         % Get all robots carrying package i
@@ -735,14 +738,12 @@ for pkg_i = 1:Npack
             end
             drawnow limitrate nocallbacks
         end
+
     end
 
-    if delivered
-        disp('--- FIRST DELIVERY CONCLUDED!');
-        disp('--- STARTING A NEW DELIVERY...');
-    else
-        fprintf(2, '--- !!!FIRST DELIVERY FAIL!!!\n');
-    end
 
+if pkg_i == Npack
+    disp('--- ALL DELIVERIES CONCLUDED');
+end
 
 end

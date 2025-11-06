@@ -89,7 +89,16 @@ function [L, areas, masses, centroids, Phi, Wrs_set] = voronoi_lloyd_ring_dyna_u
             case 'f' % free
                     Phi(:,:,k) = ones(m,n);  % uniform pdf --> optimal coverage (classic Voronoi)
             case 'i' % inbound attraction
-                    Phi(:,:,k) = inbound_attraction(X, Y, 0.1, 1);
+                    mu = [max(X(1,:))/2 5];
+                    sigma0 = sigma_point*4;
+                    sigmaMax = 4*sigma0;
+                    p  = robot_pos_est(k,:);  % current robot position
+                    d  = norm(p - mu);  % distance to the target
+                    sigma_k = ((d + R)/R) * sigma0;  % adaptive sigma = sigma0*(1 + d/R)
+                    if sigma_k > sigmaMax
+                        sigma_k = sigmaMax;                   % saturation
+                    end
+                    Phi(:,:,k) = gauss2d(X, Y, mu, sigma_k^2*eye(2));
             otherwise % error management
                 error("Unrecognized working state '%working_state' for Robots(%d).", working_state, idx_use(k));
         end
