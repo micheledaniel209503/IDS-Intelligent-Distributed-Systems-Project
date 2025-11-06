@@ -4,13 +4,16 @@ function rho = inbound_attraction(X, Y, fraction, p)
 % fraction: portion of the map that is considered "attractive"
     Ymin = min(Y(:));
     Ymax = max(Y(:));
-    Yth  = Ymin + fraction*(Ymax - Ymin); % threshold y coord
+    Yth  = Ymin + fraction*(Ymax - Ymin);
+    den  = max(eps, (Ymax - Yth));
 
-    rho = 4.*ones(size(Y));
+    rho = zeros(size(Y));
+
+    plateau = 10;
+    base = 0;
 
     above = (Y > Yth);
-    % normalized vertical distance (coordinate) in the upper part
-    t = (Y(above) - Yth) ./ max(eps, (Ymax - Yth));
-    % negative slope with an exponent (1 - t)^p up to 0
-    rho(above) = max(0, (1 - t).^p);
+    rho(above) = base + (plateau - base) .* (Ymax - Y(above)) ./ den;
+
+    rho(~above) = plateau;
 end
