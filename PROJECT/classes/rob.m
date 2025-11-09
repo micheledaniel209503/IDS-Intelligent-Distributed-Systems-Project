@@ -9,6 +9,6 @@ classdef rob
         target (1,2) double = [NaN NaN]     % [x y] target position
         P; % covariance matrix of the estimation algorithm
         item_id; % current package id that the robot is transporting
-        sr (1,1) double = 15; % [m] robot sensing radius 
+        sr (1,1) double = 18; % [m] robot sensing radius 
     end
 end

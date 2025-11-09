@@ -15,11 +15,11 @@ function [p_des, center] = TRANSPORT_control(Robots, ids_group, i_robot, form_R,
 
     %% Parameters
     
-    prob_comm = 0.7;   % Probability of successful communication
+    prob_comm = 0.8;   % Probability of successful communication
     
-    rep_range = 2;   % Start of repulsion
+    rep_range = 2.5;   % Start of repulsion
     
-    rep_sigma = 0.5;   % Width of repulsion zone
+    rep_sigma = 0.3;   % Width of repulsion zone
 
     %% Initialization
     Nrobots = length(ids_group);
@@ -53,7 +53,7 @@ function [p_des, center] = TRANSPORT_control(Robots, ids_group, i_robot, form_R,
             %% Formation control
             pos_j = Robots(j).state_est(1:2);
             pos_j = pos_j(:);
-
+            
             diff = pos_i - pos_j;
             dij = norm(diff);
 
@@ -93,7 +93,7 @@ function [p_des, center] = TRANSPORT_control(Robots, ids_group, i_robot, form_R,
                     dir_target = dir_target / (norm(dir_target) + 1e-6);
                     sign_tan = sign(det([dir_obs, dir_target]));   % direction of rotation
                     tang = sign_tan * [-dir_obs(2); dir_obs(1)];   % 90° rotated vector
-                    phi_tan = 0.6 * phi;                           % tangential weight
+                    phi_tan = 0.3 * phi;                           % tangential weight
 
                     % repulsive + tangential effects
                     u_obs_j = u_obs_j + phi * dir_obs + phi_tan * tang;
@@ -111,8 +111,12 @@ function [p_des, center] = TRANSPORT_control(Robots, ids_group, i_robot, form_R,
     end
 
     %% Attraction term
-    u_att = target - pos_i;
-    u_att = u_att / (norm(u_att) + 0.01);
+    if rand(1) <= prob_comm
+        u_att = target - center;
+    else
+        u_att = target - pos_i;
+    end
+    u_att = u_att / (norm(u_att));
 
     %% Total input (sum of the different contributions)
     u = w_form * u_form + w_att * u_att + w_obs * u_obs;

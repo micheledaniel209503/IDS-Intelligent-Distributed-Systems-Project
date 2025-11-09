@@ -10,6 +10,15 @@ clc
 close all
 clear all
 
+%% Auxiliary plot flags
+PLOT_CONSENSUS = 1;
+PLOT_STATEERROR = 1;
+PLOT_TRACEP = 1;
+%% Plot variables
+N_iter = 300;
+estState = zeros(3,N_iter);
+realState = zeros(3,N_iter);
+trP = zeros(1, N_iter);
 % add path to the class, functions folders
 addpath(genpath(pwd));
 
@@ -18,8 +27,19 @@ toDeg = 180 / pi; % Conversion factor from radians to degrees
 
 %% Parameters
 tolerance_on_lineup_form_radius = 0.2; % radial tolerance for the initial position of robots in lineup phase
+%% Measure Uncertainties
+noise_std = 0.2; % [m] std on the distance measures with the anchors
+sigma_theta = 0.02; % [RAD] std on the orientation measure 
+%% Model Uncertainties
+% Define the system matrix
+% Unicycle dynamics
+fun2 = @(x, y, theta, vel, omega, dT) [x + vel * cos(theta) * dT; y + vel * sin(theta) * dT; theta + omega * dT]; 
+A = @(x, y, theta, vel, omega, dT) [1, 0, -vel * sin(theta) * dT; 0, 1, vel * cos(theta) * dT; 0, 0, 1];
+G = @(x, y, theta, vel, omega, dT)[ dT*cos(theta), 0; dT*sin(theta), 0; 0,  dT ];
 
-%% FORMATION Control Parameters
+Q = 0.1*eye(2); % process noise covariance (set to zero if no uncertainty on the model)
+
+%% Formation Control Parameters
 k_u   = 3;      % linear
 k_omega = 2.0;      % angular
 u_max = 1;         % m/s
@@ -32,7 +52,7 @@ w_obs = 5.0;   % OBSTACLE AVOIDANCE
 
 %% Simulation parameters
 dt = 0.1; % [s] time step
-T_sim = 500; % [s] sim time
+T_sim = 1000; % [s] sim time
 iter_sim = T_sim / dt; % Calculate the number of iterations
 
 %% Building the environment
@@ -75,15 +95,24 @@ zones.outbound3.polygon = [
     map.W - 5, map.H;
     map.W - zones.outbound.W - 5, map.H
 ];
-
+%% Anchors
+% Choose N of anchors
+Nanchors = 4;
+anchors = zeros(Nanchors,2);
+anchors(:,1) = map.W * rand(Nanchors,1);
+anchors(:,2) = map.H * rand(Nanchors,1);
+for a = 1:Nanchors
+    ax = anchors(a,1); 
+    ay = anchors(a,2);
+end
 %% Generate random obstacles in the grid
 Nobs = 4;
 obstacle_dim = 8.0; % [m] characteristic dimension of the obstacles (global)
-min_dist = 15+obstacle_dim; % [m] distance between centers of the obstacles
+min_dist = 10+obstacle_dim; % [m] distance between centers of the obstacles
 
 Obstacles = spawn_obstacles(Nobs, map, obstacle_dim, min_dist);
 %% package spawn
-Npack = 3; % number of packages
+Npack = 2; % number of packages
 current_pkg = 1;
 Packages(Npack,1) = pkg();
 for k = 1:Npack
@@ -96,6 +125,7 @@ end
 Nrobots = 15;
 Robots(Nrobots,1) = rob(); % list of rob objects
 
+%% Initialialisation of robots position in the map
 % dimension factor to set the width of the robots position spawn in x
 dimensionFactor = 0.8; % Example factor for robot width adjustment
 init_pos = zeros(Nrobots, 2);
@@ -115,34 +145,19 @@ for k = 1:Nrobots
         if  (in_x && in_y)
             Robots(k).state(1) = x;
             Robots(k).state(2) = y;
+            Robots(k).state(3) = 2 * pi * rand();
             valid_pos = true;
         end
     end
 end
 
-% Robot sensing radius (for the consensus)
-for i=1:Nrobots
-    Robots(i).sr = 18;
-end
-% Number of messages exchanged
+% Number of messages exchanged in the consensus algorithm
 n_msg = 12 ;
 
 % Measurement noise
 sigma = 0.5; % std of distance noise
 
-%% LLOYD-VORONOI simulation setup parameters
-disp(['Simulation Setup...']);
-
-% map grid
-dx = 0.5;
-dy = 0.5;
-xv = 0:dx:100;   % X axis
-yv = 0:dy:80;    % Y axis
-[X,Y] = meshgrid(xv, yv); % grid
-free_mask = true(size(X)); % free grid (no obstacles) --> matrix of ones
-
-
-% VORONOI control parameters
+%% VORONOI control parameters
 Robots_voronoi = [Robots(:).id]'; % all robots in the tasselation
 sigma_ring = 1.25;
 sigma_point = 1.5;
@@ -156,6 +171,61 @@ theta_goal = deg2rad(0); % [rad] final robot orientation
 
 % optional keep theta bounded
 wrap = @(a) atan2(sin(a),cos(a));
+%% Initialisation of state estimation for robots
+for j = 1:length(Robots_voronoi)
+    idx = Robots_voronoi(j);
+
+    %% Initialisation for the estimation algorithm (recursive least square)
+    % true distances to anchors
+    distances = sqrt(sum((anchors - [Robots(idx).state(1), Robots(idx).state(2)]).^2, 2));
+    % noisy distance measurements
+    distances_noisy = distances + noise_std * randn(Nanchors, 1);
+
+    % trilateration
+    [H_xy, z_xy, C_xy] = trilateration(anchors, distances_noisy, noise_std);
+
+    % simulated noisy measurement (in real use replace with sensor reading)
+    theta_meas = Robots(idx).state(3) + sigma_theta * randn(); 
+    theta_meas = atan2(sin(theta_meas), cos(theta_meas));
+
+    % build augmented H, z, C for [x; y; theta]
+    H_theta = [0 0 1];           
+    z_theta = theta_meas;       
+    C_theta = sigma_theta^2; 
+
+    H_temp = [H_xy, zeros(size(H_xy,1),1)]; % Nanchors x 3
+
+    % combined matrices
+    H = [H_temp; H_theta];      % (Nanchors+1) x 3
+    z = [z_xy; z_theta];          % (Nanchors+1) x 1
+    C = blkdiag(C_xy, C_theta);   % (Nanchors+1) x (Nanchors+1)
+
+    % compute least-squares estimate and covariance for [x;y;theta]
+    P = inv(H' * (C \ H));
+    state_ls = P * (H' * (C \ z)); % 3x1
+
+    % assign estimates
+    Robots(idx).state_est(1) = state_ls(1);
+    Robots(idx).state_est(2) = state_ls(2);
+    Robots(idx).state_est(3) = atan2(sin(state_ls(3)), cos(state_ls(3))); % wrap
+
+    Robots(idx).P = P;
+
+
+    %trace_P = zeros(iter_sim); % initialization;
+end
+
+%% LLOYD-VORONOI simulation setup parameters
+disp(['Simulation Setup...']);
+
+% map grid
+dx = 0.5;
+dy = 0.5;
+xv = 0:dx:100;   % X axis
+yv = 0:dy:80;    % Y axis
+[X,Y] = meshgrid(xv, yv); % grid
+free_mask = true(size(X)); % free grid (no obstacles) --> matrix of ones
+
 
 %% PLACE OBSTACLES in the MAP
 % Adapt the grid
@@ -175,52 +245,14 @@ for k = 1:numel(Obstacles)
      free_mask(mask) = false;
 end
 
-%% INTRODUCING UNCERTAINTY
-
-% Define the system matrix
-% Unicycle dynamics
-fun2 = @(x, y, theta, vel, omega, dT) [x + vel * cos(theta) * dT; y + vel * sin(theta) * dT; theta + omega * dT]; 
-A = @(x, y, theta, vel, omega, dT) [1, 0, -vel * sin(theta) * dT; 0, 1, vel * cos(theta) * dT; 0, 0, 1];
-G = @(x, y, theta, vel, omega, dT)[ dT*cos(theta), 0; dT*sin(theta), 0; 0,  dT ];
-% Uncertainties
-noise_std = 0.2; % [m] std on the distance measures with the anchors
-sigma_theta = 0.02; % [RAD] std on the orientation measure 
-Q = 0.1*eye(2); % process noise covariance (set to zero if no uncertainty on the model)
-
-%% ANCHORS
-% Choose N of anchors
-Nanchors = 4;
-anchors = zeros(Nanchors,2);
-anchors(:,1) = map.W * rand(Nanchors,1);
-anchors(:,2) = map.H * rand(Nanchors,1);
-for a = 1:Nanchors
-    ax = anchors(a,1); 
-    ay = anchors(a,2);
-end
-
-% initial position of robots
-for j = 1:length(Robots_voronoi)
-    idx = Robots_voronoi(j); % select robot id
-    Robots(idx).state(1:2) = init_pos(j, :); % initialize robot positions true
-    Robots(idx).state_est(1:3) = [NaN NaN Robots(idx).state(3)];  % initialize robot positions estimate
-end
-
-%%
-
-
-% WHAT'S BELOW HERE SHOULD BE LOOPED for i = 1:Npack
-
-
+% initialise simulation plot
+figure(); clf
 
 for pkg_i = 1:Npack
 
     current_pkg = pkg_i;
     
     % Initial measure of package position (robots only if they see it)
-    % Robot sensing radius (for the consensus)
-    for i=1:Nrobots
-        Robots(i).sr = 18;
-    end
     x0 = nan(Nrobots,2); % [x_est, y_est]
     distances = zeros(Nrobots, 1);
 
@@ -246,14 +278,6 @@ for pkg_i = 1:Npack
     disp('Robots that see the package (IDs): '); disp(idxNonNaN);
     disp('Number of robots that see the package: '); disp(nNonNaN);
 
-    %% --------------------------------
-    close all; % close previous figures
-
-
-
-
-
-    %  --------------------------------
 
     %% CONSENSUS ALGORITHM (broadcast one at a time) - only among robots that see the package
     % Preallocate storage for all iterations (for all robots; NaN for non-seers)
@@ -312,11 +336,12 @@ for pkg_i = 1:Npack
 
         x_next_sub = Qi_sub * xStore_sub(:,:,t);   % [nNonNaN x 2]
         xStore_sub(:,:,t+1) = x_next_sub;
-
-        % Also update the global storage so we can plot global positions later
-        % Non-seers remain unchanged (NaN), participating robots are overwritten
-        xStore(:,:,t+1) = xStore(:,:,t);
-        xStore(idxNonNaN,:,t+1) = x_next_sub;
+        
+        % store the evolution of the estimated position for plot
+        if nNonNaN >= 1 && pkg_i == 2
+            xStore(:,:,t+1) = xStore(:,:,t);
+            xStore(idxNonNaN,:,t+1) = x_next_sub;
+        end
     end
     %disp(Q_tot);
 
@@ -327,80 +352,8 @@ for pkg_i = 1:Npack
     disp(['Est. package position (x, y): ', num2str(xStore_sub(1,1,end)), '  ',num2str(xStore_sub(1,2,end))]);
     disp(['error (distance) [cm]: ', num2str(100*sqrt((Packages(current_pkg).state(1)-xStore_sub(1,1,end))^2+(Packages(current_pkg).state(2)-xStore_sub(1,2,end))^2))])
 
-
-
-    %% Plot results on the map
-    figure(1); clf; hold on; axis equal;
-    % Map boundary
-    plot([0 map.W map.W 0 0],[0 0 map.H map.H 0],'k-'); % outline
-
-    % Inbound zone
-    fill(zones.inbound.polygon(:,1),zones.inbound.polygon(:,2), ...
-        [0.9 0.9 1],'EdgeColor','b');
-
-    % Robots
-    S = vertcat(Robots.state);   % N×2: each row = [x y] state of robot
-    plot(S(:,1), S(:,2), 'ko', 'MarkerFaceColor','w');
-    %text([Robots.state(1)]+1,[Robots.state(2)]+1,string(1:Nrobots))
-
-    % Package true position
-    hPkg = plot(Packages(current_pkg).state(1),Packages(current_pkg).state(2),'rs','MarkerFaceColor','r','MarkerSize',10);
-
-    % Final consensus estimates (only those who participated)
-    hEst = plot(xStore(:,1,end),xStore(:,2,end),'bo','MarkerFaceColor','b');
-
-    % --- Highlight robots that sense the package ---
-    theta = linspace(0,2*pi,100);
-    for i = idxNonNaN(:,1)'
-        cx = Robots(i).state(1) + Robots(i).sr*cos(theta);
-        cy = Robots(i).state(2) + Robots(i).sr*sin(theta);
-        plot(cx,cy,'k:','LineWidth',1)  % dotted circle showing sensing radius
-    end
-
-    % --- Legend (only package and estimates) ---
-    legend([hPkg, hEst], {'Package (true)','Consensus estimates'}, 'Location','best')
-    title('Map: robot positions, package and final estimates')
-
-    %% Plot: evolution of x and y estimates for each iteration
-    if nNonNaN >= 1
-        iterations = 0:n_msg; % t=0 (initial) ... n_msg
-        figure(2); clf;
-
-        % Subplot X
-        subplot(2,1,1); hold on; grid on;
-        for k = 1:nNonNaN
-            plot(iterations, squeeze(xStore_sub(k,1,:)), 'LineWidth', 1.5);
-        end
-        % Add true X value as reference line
-        yline(Packages(current_pkg).state(1), 'k--', 'LineWidth', 2, 'DisplayName','True X');
-
-        xlabel('Iteration (message step)');
-        ylabel('Estimate x (coordinate)');
-        title('Evolution of X estimates for robots that see the package');
-        legendStrings = arrayfun(@(r) sprintf('Robot %d', r), idxNonNaN, 'UniformOutput', false);
-        legend([legendStrings], 'Location','best');
-
-        % Subplot Y
-        subplot(2,1,2); hold on; grid on;
-        for k = 1:nNonNaN
-            plot(iterations, squeeze(xStore_sub(k,2,:)), 'LineWidth', 1.5);
-        end
-        % Add true Y value as reference line
-        yline(Packages(current_pkg).state(2), 'k--', 'LineWidth', 2, 'DisplayName','True Y');
-
-        xlabel('Iteration (message step)');
-        ylabel('Estimate y (coordinate)');
-        title('Evolution of Y estimates for robots that see the package');
-        legend([legendStrings], 'Location','best');
-    end
-
-    %% --------------------------------
-    
-
-
-
     %  --------------------------------------------------------------------------------------------------------
-    %% ORGANIZE TRANSPORTATION
+    %% ORGANIZE TRANSPORTATION CHANGEeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
     % Based on surface area of the package --> n° robots needed
     Packages(current_pkg).s = 20; % [m^2] surface area of the package
     robot_sc = 4; % [m^2] surface capacity of a robot
@@ -454,44 +407,13 @@ for pkg_i = 1:Npack
     [x,y] = spawn_target(zones.outbound);
     Packages(current_pkg).target = [x, y];
 
-    figure('Color','w'); hold on; axis equal;
-    fill(map.polygon(:,1), map.polygon(:,2), [0.95 0.95 0.95], 'EdgeColor','k');
-    fill(zones.inbound.polygon(:,1), zones.inbound.polygon(:,2), 'b', 'FaceAlpha', 0.3);
-    fill(zones.outbound.polygon(:,1), zones.outbound.polygon(:,2), 'r', 'FaceAlpha', 0.3);
-    plot(Packages(current_pkg).target(1), Packages(current_pkg).target(2), 'ro', 'MarkerSize', 10, 'MarkerFaceColor', 'r');
-    plot(Packages(current_pkg).state(1), Packages(current_pkg).state(2), 'bo', 'MarkerSize', 10, 'MarkerFaceColor', 'b');
-    xlabel('x'); ylabel('y'); title('Inbound (blue) / Outbound (red)');
-
-    %% Debugging the pdfs
-    % ring_pdf = ring2d(X, Y, Packages(current_pkg).state, Packages(current_pkg).r, 2, 1e-3);
-    % figure
-    % surf(xv,yv,ring_pdf); shading interp; colorbar;
-
-    % opts = struct('logscale', true, 'mode','ring', 'mu_pkg', mu_pkg, 'R', Packages(current_pkg).r);
-    % figure; plot_phi_debug(Phi, X, Y, L, Robots, idx_use, centroids, opts);
-
-
-
-
-    %% Initialisation for the estimation algorithm (recursive least square)
-    for i = 1:length(Robots_voronoi)
-        distances = sqrt(sum((anchors - [Robots(i).state(1), Robots(i).state(2)]).^2, 2));
-        distances_noisy = distances + noise_std * randn(Nanchors, 1);
-
-        [H,z,C] = trilateration(anchors, distances_noisy, 0.1);
-        P = (H'*C^-1*H)^-1;
-        state_ls = P*H'*C^-1*z;
-        Robots(i).state_est(1) = state_ls(1);
-        Robots(i).state_est(2) = state_ls(2);
-        Robots(i).state_est(3) = Robots(i).state(3); % initial estimate on initial theta = exact initial theta
-
-        P_values = [P, zeros(2, 1); zeros(1, 3)];
-        P_values(3,3) = 0.1;
-        Robots(i).P = P_values;
-
-    end
-
-    %trace_P = zeros(iter_sim); % initialization;
+    % figure('Color','w'); hold on; axis equal;
+    % fill(map.polygon(:,1), map.polygon(:,2), [0.95 0.95 0.95], 'EdgeColor','k');
+    % fill(zones.inbound.polygon(:,1), zones.inbound.polygon(:,2), 'b', 'FaceAlpha', 0.3);
+    % fill(zones.outbound.polygon(:,1), zones.outbound.polygon(:,2), 'r', 'FaceAlpha', 0.3);
+    % plot(Packages(current_pkg).target(1), Packages(current_pkg).target(2), 'ro', 'MarkerSize', 10, 'MarkerFaceColor', 'r');
+    % plot(Packages(current_pkg).state(1), Packages(current_pkg).state(2), 'bo', 'MarkerSize', 10, 'MarkerFaceColor', 'b');
+    % xlabel('x'); ylabel('y'); title('Inbound (blue) / Outbound (red)');
 
     %% LINEUP SIMULATION with SENSING RADIUS
 
@@ -499,11 +421,7 @@ for pkg_i = 1:Npack
 
     USEREACTIVE = true;   % flag: if false --> use standard voronoi (no cutting for the cells, no obstacle avoidance)
     DRAWCONTOUR = false;   % flag: draw contours of the voronoi cells
-    rsense      = 8.0;  % [m] sensing radius for the robots (can be reduced in order to manage the collision avoidance in a different way)
 
-    for i=1:numel(Robots)
-        Robots(i).sr = rsense;
-    end
 
     center_pkg = NaN(Npack, 2);
 
@@ -512,7 +430,6 @@ for pkg_i = 1:Npack
     % plot
     RN   = numel(Robots_voronoi);
 
-    figure(101); clf
     imagesc(xv, yv, free_mask); set(gca,'YDir','normal'); colormap(gray); axis equal tight; hold on
     hTitle = title(sprintf('RING LINEUP (WITH UNCERTAINTIES): 0.0%%'));
     cmap = lines(numel(Wrs_set));
@@ -564,6 +481,15 @@ clear center
 disp('--- STARTING A NEW DELIVERY...');
 
 for k = 1:iter_sim
+        % For the auxiliary plot
+        if k <= N_iter && pkg_i == 1
+            realPos = Robots(1).state;
+            realState(:,k) = realPos;
+            estPos = Robots(1).state_est;
+            estState(:,k) = estPos;
+            trP(k) = trace(Robots(1).P);
+        end
+
         % state estimation
         for j = 1:numel(Robots_voronoi)
             % Measure of distances wrt anchors and orientation
@@ -659,7 +585,7 @@ for k = 1:iter_sim
             Packages(current_pkg).state_est = center_pkg(current_pkg,:);
         end
         % check delivery
-        tol_target = max(Packages(current_pkg).r - 1, 1.0); % tolerance on distance [m]
+        tol_target = 0.2; % tolerance on distance [m]
         delivered = check_delivered(Packages(current_pkg).state_est, Packages(current_pkg).target, zones.outbound.polygon, tol_target);
 
         if delivered % CHANGE STATE OF THE ACTIVE ROBOTS
@@ -747,3 +673,79 @@ if pkg_i == Npack
 end
 
 end
+
+
+
+%% Auxiliary plots
+
+%% Evolution of package position during consensus
+if PLOT_CONSENSUS
+    iterations = 0:n_msg; % t=0 (initial) ... n_msg
+    figure(); clf;
+    
+    % Subplot X
+    subplot(2,1,1); hold on; grid on;
+    for k = 1:nNonNaN
+        plot(iterations, squeeze(xStore_sub(k,1,:)), 'LineWidth', 1.5);
+    end
+    % Add true X value as reference line
+    yline(Packages(current_pkg).state(1), 'k--', 'LineWidth', 2, 'DisplayName','True X');
+    
+    xlabel('Iteration (message step)');
+    ylabel('Estimate x (coordinate)');
+    title('Evolution of X estimates for robots that see the package');
+    legendStrings = arrayfun(@(r) sprintf('Robot %d', r), idxNonNaN, 'UniformOutput', false);
+    legend(legendStrings, 'Location','best');
+    
+    % Subplot Y
+    subplot(2,1,2); hold on; grid on;
+    for k = 1:nNonNaN
+        plot(iterations, squeeze(xStore_sub(k,2,:)), 'LineWidth', 1.5);
+    end
+    % Add true Y value as reference line
+    yline(Packages(current_pkg).state(2), 'k--', 'LineWidth', 2, 'DisplayName','True Y');
+    
+    xlabel('Iteration (message step)');
+    ylabel('Estimate y (coordinate)');
+    title('Evolution of Y estimates for robots that see the package');
+    legend(legendStrings, 'Location','best');
+end
+
+%% State estimation error over time
+if PLOT_STATEERROR
+    % Compute estimation error
+    errorState = realState - estState;
+    
+    % Number of iterations
+    iters = 1:size(realState,2);
+    
+    % Plot errors
+    figure;
+    subplot(2,1,1);
+    plot(iters, abs(errorState(1,:)), 'LineWidth', 1); hold on;
+    plot(iters, abs(errorState(2,:)), 'LineWidth', 1);
+    ylabel('Position Error [m]');
+    title('State Estimation Error');
+    legend('Error in x','Error in y');
+    grid on;
+    
+    subplot(2,1,2);
+    plot(iters, abs(errorState(3,:)), 'LineWidth', 1);
+    ylabel('Error in \theta [rad]');
+    xlabel('Iterations');
+    grid on;
+end
+
+%% Covariance matrix P trace
+if PLOT_TRACEP
+    figure;
+    plot(iters, trP,'LineWidth', 1);
+    ylabel('Covariance');
+    xlabel('Iterations')
+    title('Trace of covariance matrix P');
+    grid on;
+
+
+
+end
+
