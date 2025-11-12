@@ -15,7 +15,7 @@ PLOT_CONSENSUS = 1;
 PLOT_STATEERROR = 1;
 PLOT_TRACEP = 1;
 %% Plot variables
-N_iter = 300;
+N_iter = 1000;
 estState = zeros(3,N_iter);
 realState = zeros(3,N_iter);
 trP = zeros(1, N_iter);
@@ -37,7 +37,10 @@ fun2 = @(x, y, theta, vel, omega, dT) [x + vel * cos(theta) * dT; y + vel * sin(
 A = @(x, y, theta, vel, omega, dT) [1, 0, -vel * sin(theta) * dT; 0, 1, vel * cos(theta) * dT; 0, 0, 1];
 G = @(x, y, theta, vel, omega, dT)[ dT*cos(theta), 0; dT*sin(theta), 0; 0,  dT ];
 
-Q = 0.1*eye(2); % process noise covariance (set to zero if no uncertainty on the model)
+% set process noise variances for v and omega
+sigma_v = 0.2;        % m/s (example)
+sigma_omega = 0.1;    % rad/s (example)
+Q = diag([sigma_v^2, sigma_omega^2]);  % 2x2,
 
 %% Formation Control Parameters
 k_u   = 3;      % linear
@@ -106,13 +109,13 @@ for a = 1:Nanchors
     ay = anchors(a,2);
 end
 %% Generate random obstacles in the grid
-Nobs = 4;
+Nobs = 3;
 obstacle_dim = 8.0; % [m] characteristic dimension of the obstacles (global)
 min_dist = 10+obstacle_dim; % [m] distance between centers of the obstacles
 
 Obstacles = spawn_obstacles(Nobs, map, obstacle_dim, min_dist);
 %% package spawn
-Npack = 2; % number of packages
+Npack = 3; % number of packages
 current_pkg = 1;
 Packages(Npack,1) = pkg();
 for k = 1:Npack
@@ -497,20 +500,14 @@ for k = 1:iter_sim
             distances_noisy = distances + noise_std * randn(Nanchors, 1);
             % trilateration
             [H_tril,z_tril,R_tril] = trilateration(anchors, distances_noisy, noise_std);
+            H_tril = [H_tril, zeros(size(H_tril,1),1)];  % Extend trilateration Jacobian
+            % Orientation measure
             z_theta = Robots(j).state(3) + sigma_theta*randn();
-            % Extend H to include theta state and add orientation measurement row
-            m = size(H_tril,1);
-            H_extended = [H_tril, zeros(m,1)];
             H_theta = [0, 0, 1];
-
-            % Stack H and z
-            H = [H_extended; H_theta];
-            z = [z_tril; z_theta];
-
-            R = blkdiag(R_tril, sigma_theta^2);
+            R_theta = sigma_theta^2;
 
             % Estimation of position and orientation using EKF (based on the last control input)
-            [Robots(j).state_est, Robots(j).P] = EKF_function(Robots(j).state_est, Robots(j).u, Robots(j).omega, fun2, A, G, z, H, Robots(j).P, Q, R, dt);
+            [Robots(j).state_est, Robots(j).P] = EKF_function(Robots(j).state_est, Robots(j).u, Robots(j).omega, fun2, A, G, H_tril, z_tril, R_tril, H_theta, z_theta, R_theta, Robots(j).P, Q, dt, k);
             % Update the trace of the covariance matrix
             %trace_P(k) = trace_P(k) + trace(Robots(j).P);
         end

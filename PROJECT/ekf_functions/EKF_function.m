@@ -1,34 +1,30 @@
-function [state_k_1, P_k_1] = EKF_function(state, v, omega, Dyn_fun, A_fun, G_fun, z, H, P, Q, R, dt)
-% EKF_FUNCTION  Extended Kalman Filter for nonlinear state estimation
-%
-%   [state_k_1, P_k_1] = EKF_function(state, v, omega, Dyn_fun, A_fun, ...
-%                                     G_fun, z, H, P, Q, R, dt)
-%
-%   This function performs one prediction and update cycle of the Extended
-%   Kalman Filter (EKF) for a nonlinear system with state vector:
-%
-%       state = [x; y; theta]
-%
-%   Inputs:
-%       state   - 3x1 current estimated state vector [x; y; theta]
-%       v       - linear velocity control input
-%       omega   - angular velocity control input
-%       Dyn_fun - function handle for nonlinear system dynamics
-%                 state_pred = Dyn_fun(x, y, theta, v, omega, dt)
-%       A_fun   - function handle for Jacobian of dynamics w.r.t. state
-%       G_fun   - function handle for Jacobian of dynamics w.r.t. process noise
-%       z       - measurement vector
-%       H       - measurement model matrix, dimension mx3 (m: N of anchors)
-%       P       - 3x3 state covariance matrix
-%       Q       - 3x3 process noise covariance matrix
-%       R       - measurement noise covariance matrix
-%       dt      - timestep duration
-%
-%   Outputs:
-%       state_k_1 - 3x1 updated state estimate after EKF step
-%       P_k_1     - 3x3 updated state covariance matrix
+function [state_k_1, P_k_1] = EKF_function(state, v, omega, Dyn_fun, A_fun, G_fun, ...
+                                           H_xy, z_xy, R_xy, H_theta, z_theta, R_theta, ...
+                                           P, Q, dt, k)
+% Inputs:
+%   state    - [3x1] current estimated state vector [x; y; theta]
+%   v        - linear velocity input
+%   omega    - angular velocity input
+%   Dyn_fun  - function handle for nonlinear system dynamics:
+%   A_fun    - function handle for Jacobian of dynamics w.r.t. state
+%   G_fun    - function handle for Jacobian of dynamics w.r.t. process noise
+%   H_xy     - measurement matrix for position
+%   z_xy     - position measurement vector
+%   R_xy     - measurement noise covariance for position
+%   H_theta  - measurement matrix for orientation (1 x 3)
+%   z_theta  - scalar orientation measurement
+%   R_theta  - scalar orientation measurement noise variance
+%   P        - [3x3] state covariance matrix
+%   Q        - [2x2] process noise covariance matrix
+%   dt       - time step
+%   k        - current iteration number
 
-    %% --- Prediction ---
+
+    %% --- Update periods ---
+    N_xy = 5;       % perform position update every N_xy steps
+    N_theta = 5;    % perform orientation update every N_theta steps
+
+    %% --- Prediction step ---
     x = state(1);
     y = state(2);
     th = state(3);
@@ -36,30 +32,44 @@ function [state_k_1, P_k_1] = EKF_function(state, v, omega, Dyn_fun, A_fun, G_fu
     % Nonlinear motion model
     state_pred = Dyn_fun(x, y, th, v, omega, dt);
 
-    % Jacobian A = df/dx evaluated at current state
+    % Jacobians
     A = A_fun(x, y, th, v, omega, dt);
-    % Jacobian G (effect of disturbances on the model)
     G = G_fun(x, y, th, v, omega, dt);
-    
+
     % Predicted covariance
     P_pred = A * P * A' + G * Q * G';
 
-    %% --- Update ---
+    % Initialize for update phase
+    state_k_1 = state_pred;
+    P_k_1 = P_pred;
 
-    y = (z - H * state_pred); % innovation
+    %% Update position only every N_xy iterations
+    if mod(k, N_xy) == 0
 
-    % Normalize angular innovation (last element) to [-pi,pi]
-    y(end) = atan2(sin(y(end)), cos(y(end)));
+        innov_xy = z_xy - H_xy * state_k_1;          % innovation
+        S_xy = H_xy * P_k_1 * H_xy' + R_xy;          % innovation covariance
+        K_xy = P_k_1 * H_xy' / S_xy;                 % Kalman gain
 
-    S = H * P_pred * H' + R;
-    K = P_pred * H' / S;
-    % State update
-    state_k_1 = state_pred + K * y;
-    % Normalize estimated theta to [-pi,pi]
-    state_k_1(3) = atan2(sin(state_k_1(3)), cos(state_k_1(3)));
+        state_k_1 = state_k_1 + K_xy * innov_xy;     % state correction
+        state_k_1(3) = atan2(sin(state_k_1(3)), cos(state_k_1(3))); % normalize angle
 
-    % Covariance update
-    P_k_1 = (eye(size(P)) - K*H) * P_pred * (eye(size(P)) - K*H)' + K * R * K';
+        I = eye(3);
+        P_k_1 = (I - K_xy * H_xy) * P_k_1 * (I - K_xy * H_xy)' + K_xy * R_xy * K_xy';
+    end
 
-   
+    %% Update position only every N_theta iterations
+    if mod(k, N_theta) == 0
+        innov_th = z_theta - H_theta * state_k_1;    % innovation
+        innov_th = atan2(sin(innov_th), cos(innov_th)); % normalization
+
+        S_th = H_theta * P_k_1 * H_theta' + R_theta; % innovation covariance
+        K_th = (P_k_1 * H_theta') / S_th;            % Kalman gain
+
+        state_k_1 = state_k_1 + K_th * innov_th;     % state correction
+        state_k_1(3) = atan2(sin(state_k_1(3)), cos(state_k_1(3))); % normalize angle
+
+        I = eye(3);
+        P_k_1 = (I - K_th * H_theta) * P_k_1 * (I - K_th * H_theta)' + K_th * R_theta * K_th';
+    end
+
 end
