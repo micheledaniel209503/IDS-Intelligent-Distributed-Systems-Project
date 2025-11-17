@@ -14,6 +14,8 @@ clear all
 PLOT_CONSENSUS = 1;
 PLOT_STATEERROR = 1;
 PLOT_TRACEP = 1;
+USEREACTIVE = true;   % flag: if false --> use standard voronoi (no cutting for the cells, no obstacle avoidance)
+DRAWCONTOUR = true;   % flag: draw contours of the voronoi cells
 %% Plot variables
 N_iter = 1000;
 estState = zeros(3,N_iter);
@@ -421,9 +423,6 @@ for pkg_i = 1:Npack
     %% LINEUP SIMULATION with SENSING RADIUS
 
     disp('--- STARTING A NEW DELIVERY...');
-
-    USEREACTIVE = true;   % flag: if false --> use standard voronoi (no cutting for the cells, no obstacle avoidance)
-    DRAWCONTOUR = false;   % flag: draw contours of the voronoi cells
 
 
     center_pkg = NaN(Npack, 2);

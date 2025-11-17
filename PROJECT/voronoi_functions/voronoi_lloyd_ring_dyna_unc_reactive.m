@@ -136,6 +136,11 @@ function [L, areas, masses, centroids, Phi, Wrs_set] = voronoi_lloyd_ring_dyna_u
                 Cy = sum(sum(Y .* w)) * cell_area / M;
                 centroids(k,:) = [Cx, Cy];
             end
+            % projection of centroid on Wrs
+            if use_reactive && all(isfinite(centroids(k,:)))
+                centroids(k,:) = project_centroid(centroids(k,:), Wrs_set{k}, X, Y);
+            end
+
     end
 end
 
