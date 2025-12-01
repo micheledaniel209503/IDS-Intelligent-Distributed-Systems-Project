@@ -713,7 +713,7 @@ for k = 1:iter_sim
             Robots(id).state = fun2(Robots(id).state(1), Robots(id).state(2), Robots(id).state(3), Robots(id).u, Robots(id).omega, dt);
 
             % wrap theta
-            Robots(id).state(3) = wrap(Robots(id).state(3));
+            Robots(id).state(3) = wrap(Robots(id).state(3))
         end
 
         % plot
