@@ -14,7 +14,6 @@ clear all
 PLOT_CONSENSUS = 1;
 PLOT_STATEERROR = 1;
 PLOT_TRACEP = 1;
-PLOT_FORM_ERR = 1;
 USEREACTIVE = true;   % flag: if false --> use standard voronoi (no cutting for the cells, no obstacle avoidance)
 DRAWCONTOUR = false;   % flag: draw contours of the voronoi cells
 %% Plot variables
@@ -23,8 +22,6 @@ estState = zeros(3,N_iter);
 realState = zeros(3,N_iter);
 trP = zeros(1, N_iter);
 trP_delivered = [];
-form_err = zeros(1, N_iter);
-form_err_idx = 1;
 % add path to the class, functions folders
 addpath(genpath(pwd));
 
@@ -35,7 +32,7 @@ toDeg = 180 / pi; % Conversion factor from radians to degrees
 tolerance_on_lineup_form_radius = 0.2; % radial tolerance for the initial position of robots in lineup phase
 %% Measure Uncertainties
 noise_std = 0.2; % [m] std on the distance measures with the anchors
-sigma_theta = 2*toRad; % [RAD] std on the orientation measure 
+sigma_theta = 0.02; % [RAD] std on the orientation measure 
 %% Model Uncertainties
 % Define the system matrix
 % Unicycle dynamics
@@ -56,7 +53,8 @@ omega_max = 0.2;     % rad/s
 
 w_form  = 0.2; % FORMATION TASK
 w_att = 5.0; % TARGET TASK
-w_obs = 10.0;   % OBSTACLE AVOIDANCE
+w_damp = 0.0;
+w_obs = 5.0;   % OBSTACLE AVOIDANCE
 
 %% Simulation parameters
 dt = 0.1; % [s] time step
@@ -114,7 +112,7 @@ for a = 1:Nanchors
     ay = anchors(a,2);
 end
 %% Generate random obstacles in the grid
-Nobs = 4;
+Nobs = 3;
 obstacle_dim = 8.0; % [m] characteristic dimension of the obstacles (global)
 min_dist = 10+obstacle_dim; % [m] distance between centers of the obstacles
 
@@ -127,10 +125,6 @@ for k = 1:Npack
     Packages(k).id = k;
     [Packages(k).state(1), Packages(k).state(2)] = spawn_pkg(zones.inbound);
 end
-
-% error on localization of each pkg (euclidean norm between eestimate and
-% real)
-pkg_loc_error = NaN(Npack,1); % [m]
 %% Robots spawn
 % create the robots, placing them in random positions, avoiding the inbound
 % zone
@@ -240,7 +234,7 @@ hRob = plot(rob_pos(:,1), rob_pos(:,2), 'o', ...
 'MarkerSize',8, 'MarkerFaceColor',[0 0.6 1], ...
 'MarkerEdgeColor','k');
 % package
-pkg_pos  = Packages(1).state_est(1:2);
+pkg_pos  = Packages(1).state(1:2);
 pkg_side = sqrt(Packages(1).s);
 half_s   = pkg_side/2;
 x_pkg = [pkg_pos(1)-half_s, pkg_pos(1)+half_s, ...
@@ -305,8 +299,8 @@ for j = 1:length(Robots_voronoi)
     C = blkdiag(C_xy, C_theta);   % (Nanchors+1) x (Nanchors+1)
 
     % compute least-squares estimate and covariance for [x;y;theta]
-    P = (H'*C^-1*H)^-1;
-    state_ls = P*H'*C^-1*z; 
+    P = inv(H' * (C \ H));
+    state_ls = P * (H' * (C \ z)); % 3x1
 
     % assign estimates
     Robots(idx).state_est(1) = state_ls(1);
@@ -354,10 +348,6 @@ figure(); clf
 
 for pkg_i = 1:Npack
 
-    for j = 1:numel(Robots)
-        Robots(j).sr = 20;
-    end
-
     current_pkg = pkg_i;
     
     % Initial measure of package position (robots only if they see it)
@@ -374,8 +364,8 @@ for pkg_i = 1:Npack
             % Noisy distance measurement -> backproject as rough estimate
             noisy_dist = dist + sigma*randn();
             % Assume robot points directly toward the package (simplification)
-            est_x = Robots(i).state_est(1) + noisy_dist * dx/dist;
-            est_y = Robots(i).state_est(2) + noisy_dist * dy/dist;
+            est_x = Robots(i).state(1) + noisy_dist * dx/dist;
+            est_y = Robots(i).state(2) + noisy_dist * dy/dist;
             x0(i,:) = [est_x, est_y];
         end
     end
@@ -406,7 +396,7 @@ for pkg_i = 1:Npack
 
     % alpha relative to the participating subset (ensures double-stochastic matrices)
     % alpha_sub = 1/(nNonNaN-1) is the standard choice to guarantee nonnegative diagonal
-    alpha_sub = 1/(nNonNaN);
+    alpha_sub = 1/(nNonNaN-1);
     Q_tot = eye(nNonNaN);
 
     for t = 1:n_msg
@@ -455,20 +445,10 @@ for pkg_i = 1:Npack
 
     % assign to the package its own state estimate
     Packages(current_pkg).state_est = mean(xStore_sub(:,:,end),1);
-    % pkg localization error (euclidean norm between real and estimate)
-    err_pkg = sqrt( (Packages(current_pkg).state(1) - Packages(current_pkg).state_est(1))^2 + (Packages(current_pkg).state(2) - Packages(current_pkg).state_est(2))^2 );
-    pkg_loc_error(current_pkg) = err_pkg; % [m] error for this pkg
 
     disp(['Real package position (x, y): ', num2str(Packages(current_pkg).state(1)), '  ', num2str(Packages(current_pkg).state(2))]);
     disp(['Est. package position (x, y): ', num2str(xStore_sub(1,1,end)), '  ',num2str(xStore_sub(1,2,end))]);
     disp(['error (distance) [cm]: ', num2str(100*sqrt((Packages(current_pkg).state(1)-xStore_sub(1,1,end))^2+(Packages(current_pkg).state(2)-xStore_sub(1,2,end))^2))])
-
-
-    tolerance_on_lineup_form_radius = 0.20 + 0.8*err_pkg;
-
-    for j = 1:numel(Robots)
-        Robots(j).sr = 12;
-    end
 
     %  --------------------------------------------------------------------------------------------------------
     %% ORGANIZE TRANSPORTATION CHANGEeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
@@ -500,7 +480,7 @@ for pkg_i = 1:Npack
     for i = 1:length(Robots_selected_id)
         idx = Robots_selected_id(i);
         Robots(idx).working_state = 'r'; % ring working state test
-        Robots(idx).target = Packages(current_pkg).state_est(1:2);
+        Robots(idx).target = Packages(current_pkg).state(1:2);
     end
 
     for j = 1:length(Robots)
@@ -675,7 +655,7 @@ for k = 1:iter_sim
             end
         end
 
-        %% FORMATION CONTROL
+        %% FORMATION + TARGET CONTROL
         for id = robots_id_itemId_i
             if Robots(id).working_state ~= 't'
                 break;
@@ -687,12 +667,6 @@ for k = 1:iter_sim
                 r_goal, theta_goal);
             Robots(id).u = u;
             Robots(id).omega = omega;
-        end
-        % compute the formation error
-        if Robots(robots_id_itemId_i(1)).working_state == 't' && current_pkg == 1 && form_err_idx <= N_iter
-            form_err(form_err_idx) = formation_error(Robots, robots_id_itemId_i, Packages(current_pkg).r);
-            form_err_idx = form_err_idx + 1;
-
         end
 
         if (exist('center','var') && all(isfinite(center)))
@@ -739,7 +713,7 @@ for k = 1:iter_sim
             Robots(id).state = fun2(Robots(id).state(1), Robots(id).state(2), Robots(id).state(3), Robots(id).u, Robots(id).omega, dt);
 
             % wrap theta
-            Robots(id).state(3) = wrap(Robots(id).state(3));
+            Robots(id).state(3) = wrap(Robots(id).state(3))
         end
 
         % plot
@@ -830,16 +804,7 @@ end
 if PLOT_STATEERROR
     % Compute estimation error
     errorState = realState - estState;
-
-    % Eliminate broken columns
-    valid_cols = any(realState ~= 0, 1);
-    % Position error (euclidean norm in x,y)
-    posErr = sqrt(errorState(1,valid_cols).^2 + errorState(2,valid_cols).^2);
-
-    % Error metrics
-    mean_state_pos_error  = mean(posErr); % [m] mean error on position
-    mean_state_theta_error = mean(abs(errorState(3,valid_cols)));  % [rad] mean error on orientation
-
+    
     % Number of iterations
     iters = 1:size(realState,2);
     
@@ -870,14 +835,6 @@ if PLOT_TRACEP
     grid on;
 end
 
-%% Formation error (average on robots)
-if PLOT_FORM_ERR
-    figure;
-    plot(1:length(form_err), form_err,'LineWidth', 1);
-    ylabel('Formation error [m]');
-    xlabel('Iterations')
-    grid on;
-end
 %% TRAJECTORIES
 
 figure('Color','w'); hold on; axis equal; box on;
@@ -923,7 +880,7 @@ plot(anchors(:,1), anchors(:,2), '^', ...
     'MarkerSize',8, 'MarkerFaceColor','y', ...
     'MarkerEdgeColor','k', 'LineWidth',1.2);
 % pkg
-pkg_pos  = Packages(1).state_est(1:2);
+pkg_pos  = Packages(1).state(1:2);
 pkg_pos = [cx cy];
 pkg_side = sqrt(Packages(1).s);
 half_s   = pkg_side/4;
@@ -962,7 +919,7 @@ for i = 1:Nrobots
             'MarkerSize', isSelected*2+5, 'MarkerFaceColor',col_inbound,'MarkerEdgeColor','k');
     end
 
-    % lineup-ring
+    lineup-ring
     mask = (state_log(i,:) == 'r');
     if any(mask)
         x_plot = x_i; x_plot(~mask) = NaN;
