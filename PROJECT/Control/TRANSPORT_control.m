@@ -17,9 +17,9 @@ function [p_des, center] = TRANSPORT_control(Robots, ids_group, i_robot, form_R,
     
     prob_comm = 0.8;   % Probability of successful communication
     
-    rep_range = 2.5;   % Start of repulsion
+    rep_range = 3.0;   % Start of repulsion
     
-    rep_sigma = 0.3;   % Width of repulsion zone
+    rep_sigma = 0.6;   % Width of repulsion zone
 
     %% Initialization
     Nrobots = length(ids_group);
@@ -38,7 +38,7 @@ function [p_des, center] = TRANSPORT_control(Robots, ids_group, i_robot, form_R,
     [~, sort_idx] = sort(angles);
     ids_group = ids_group(sort_idx);
 
-    %% Initialize control terms
+    %% Initializ control terms
     u_form = [0; 0];
     u_obs  = [0; 0];
 
@@ -85,7 +85,7 @@ function [p_des, center] = TRANSPORT_control(Robots, ids_group, i_robot, form_R,
                 % Only consider obstacle if within sensing range
                 if d < sr_j && d > 1e-3
                     % Repulsion intensity
-                    phi = 10*exp(-((d - rep_range/2)^2) / (2*rep_sigma^2));
+                    phi = 1*exp(-((d - rep_range/2)^2) / (2*rep_sigma^2));
                     dir_obs = diff_o / (norm(diff_o) + 1e-6);
 
                     % Tangential component (in order to avoid motion stops)
@@ -93,7 +93,7 @@ function [p_des, center] = TRANSPORT_control(Robots, ids_group, i_robot, form_R,
                     dir_target = dir_target / (norm(dir_target) + 1e-6);
                     sign_tan = sign(det([dir_obs, dir_target]));   % direction of rotation
                     tang = sign_tan * [-dir_obs(2); dir_obs(1)];   % 90° rotated vector
-                    phi_tan = 0.3 * phi;                           % tangential weight
+                    phi_tan = 0.8 * phi;                           % tangential weight
 
                     % repulsive + tangential effects
                     u_obs_j = u_obs_j + phi * dir_obs + phi_tan * tang;

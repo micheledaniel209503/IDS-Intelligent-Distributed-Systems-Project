@@ -1,4 +1,4 @@
-classdef rob
+classdef robb
     properties
         id int8 = NaN; % [-] identification number
 

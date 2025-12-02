@@ -10,13 +10,12 @@ function [x_opt,Qlist,Qprod] = RoundRobinQmatrix(n)
 %   Qlist = cell array containing matrices Qk
 %   Qprod = product Qn*Qn-1*...*Q1
 
-    tol = 0; % lower bound for the unknown
+    tol = 0.05; % lower bound for the unknown
 
     % Number of variables: 2 per each Qk
     nVars = 2*n;
 
-    % Objective function: since there is no true cost function,
-    % we simply set it to a constant
+    % cost function
     fun = @(x) norm(x-0.5);
 
     % Nonlinear constraints (double stochasticity)

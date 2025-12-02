@@ -14,6 +14,7 @@ clear all
 PLOT_CONSENSUS = 1;
 PLOT_STATEERROR = 1;
 PLOT_TRACEP = 1;
+PLOT_FORM_ERR = 1;
 USEREACTIVE = true;   % flag: if false --> use standard voronoi (no cutting for the cells, no obstacle avoidance)
 DRAWCONTOUR = false;   % flag: draw contours of the voronoi cells
 %% Plot variables
@@ -22,6 +23,8 @@ estState = zeros(3,N_iter);
 realState = zeros(3,N_iter);
 trP = zeros(1, N_iter);
 trP_delivered = [];
+form_err = zeros(1, N_iter);
+form_err_idx = 1;
 % add path to the class, functions folders
 addpath(genpath(pwd));
 
@@ -32,7 +35,7 @@ toDeg = 180 / pi; % Conversion factor from radians to degrees
 tolerance_on_lineup_form_radius = 0.2; % radial tolerance for the initial position of robots in lineup phase
 %% Measure Uncertainties
 noise_std = 0.2; % [m] std on the distance measures with the anchors
-sigma_theta = 0.02; % [RAD] std on the orientation measure 
+sigma_theta = 2*toRad; % [RAD] std on the orientation measure 
 %% Model Uncertainties
 % Define the system matrix
 % Unicycle dynamics
@@ -53,8 +56,7 @@ omega_max = 0.2;     % rad/s
 
 w_form  = 0.2; % FORMATION TASK
 w_att = 5.0; % TARGET TASK
-w_damp = 0.0;
-w_obs = 5.0;   % OBSTACLE AVOIDANCE
+w_obs = 10.0;   % OBSTACLE AVOIDANCE
 
 %% Simulation parameters
 dt = 0.1; % [s] time step
@@ -112,7 +114,7 @@ for a = 1:Nanchors
     ay = anchors(a,2);
 end
 %% Generate random obstacles in the grid
-Nobs = 3;
+Nobs = 4;
 obstacle_dim = 8.0; % [m] characteristic dimension of the obstacles (global)
 min_dist = 10+obstacle_dim; % [m] distance between centers of the obstacles
 
@@ -299,8 +301,8 @@ for j = 1:length(Robots_voronoi)
     C = blkdiag(C_xy, C_theta);   % (Nanchors+1) x (Nanchors+1)
 
     % compute least-squares estimate and covariance for [x;y;theta]
-    P = inv(H' * (C \ H));
-    state_ls = P * (H' * (C \ z)); % 3x1
+    P = (H'*C^-1*H)^-1;
+    state_ls = P*H'*C^-1*z; 
 
     % assign estimates
     Robots(idx).state_est(1) = state_ls(1);
@@ -364,8 +366,8 @@ for pkg_i = 1:Npack
             % Noisy distance measurement -> backproject as rough estimate
             noisy_dist = dist + sigma*randn();
             % Assume robot points directly toward the package (simplification)
-            est_x = Robots(i).state(1) + noisy_dist * dx/dist;
-            est_y = Robots(i).state(2) + noisy_dist * dy/dist;
+            est_x = Robots(i).state_est(1) + noisy_dist * dx/dist;
+            est_y = Robots(i).state_est(2) + noisy_dist * dy/dist;
             x0(i,:) = [est_x, est_y];
         end
     end
@@ -396,7 +398,7 @@ for pkg_i = 1:Npack
 
     % alpha relative to the participating subset (ensures double-stochastic matrices)
     % alpha_sub = 1/(nNonNaN-1) is the standard choice to guarantee nonnegative diagonal
-    alpha_sub = 1/(nNonNaN-1);
+    alpha_sub = 1/(nNonNaN);
     Q_tot = eye(nNonNaN);
 
     for t = 1:n_msg
@@ -655,7 +657,7 @@ for k = 1:iter_sim
             end
         end
 
-        %% FORMATION + TARGET CONTROL
+        %% FORMATION CONTROL
         for id = robots_id_itemId_i
             if Robots(id).working_state ~= 't'
                 break;
@@ -667,6 +669,12 @@ for k = 1:iter_sim
                 r_goal, theta_goal);
             Robots(id).u = u;
             Robots(id).omega = omega;
+        end
+        % compute the formation error
+        if Robots(robots_id_itemId_i(1)).working_state == 't' && current_pkg == 1 && form_err_idx <= N_iter
+            form_err(form_err_idx) = formation_error(Robots, robots_id_itemId_i, Packages(current_pkg).r);
+            form_err_idx = form_err_idx + 1;
+
         end
 
         if (exist('center','var') && all(isfinite(center)))
@@ -835,6 +843,14 @@ if PLOT_TRACEP
     grid on;
 end
 
+%% Formation error (average on robots)
+if PLOT_FORM_ERR
+    figure;
+    plot(1:length(form_err), form_err,'LineWidth', 1);
+    ylabel('Formation error [m]');
+    xlabel('Iterations')
+    grid on;
+end
 %% TRAJECTORIES
 
 figure('Color','w'); hold on; axis equal; box on;

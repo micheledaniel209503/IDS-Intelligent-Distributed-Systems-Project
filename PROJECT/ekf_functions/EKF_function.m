@@ -21,8 +21,11 @@ function [state_k_1, P_k_1] = EKF_function(state, v, omega, Dyn_fun, A_fun, G_fu
 
 
     %% --- Update periods ---
-    N_xy = 5;       % perform position update every N_xy steps
-    N_theta = 5;    % perform orientation update every N_theta steps
+    f_xy = 1; % Frequency for position updates
+    f_theta = 5; % Frequency for orientation updates
+
+    N_xy    = ceil(1 / (f_xy * dt));
+    N_theta = ceil(1 / (f_theta * dt));
 
     %% --- Prediction step ---
     x = state(1);
@@ -48,13 +51,13 @@ function [state_k_1, P_k_1] = EKF_function(state, v, omega, Dyn_fun, A_fun, G_fu
 
         innov_xy = z_xy - H_xy * state_k_1;          % innovation
         S_xy = H_xy * P_k_1 * H_xy' + R_xy;          % innovation covariance
-        K_xy = P_k_1 * H_xy' / S_xy;                 % Kalman gain
+        K_xy = P_k_1 * H_xy' * S_xy^-1;                 % Kalman gain
 
         state_k_1 = state_k_1 + K_xy * innov_xy;     % state correction
         state_k_1(3) = atan2(sin(state_k_1(3)), cos(state_k_1(3))); % normalize angle
 
         I = eye(3);
-        P_k_1 = (I - K_xy * H_xy) * P_k_1 * (I - K_xy * H_xy)' + K_xy * R_xy * K_xy';
+        P_k_1 = (I - K_xy * H_xy) * P_k_1;
     end
 
     %% Update position only every N_theta iterations
@@ -63,13 +66,13 @@ function [state_k_1, P_k_1] = EKF_function(state, v, omega, Dyn_fun, A_fun, G_fu
         innov_th = atan2(sin(innov_th), cos(innov_th)); % normalization
 
         S_th = H_theta * P_k_1 * H_theta' + R_theta; % innovation covariance
-        K_th = (P_k_1 * H_theta') / S_th;            % Kalman gain
+        K_th = (P_k_1 * H_theta') * S_th^-1;            % Kalman gain
 
         state_k_1 = state_k_1 + K_th * innov_th;     % state correction
         state_k_1(3) = atan2(sin(state_k_1(3)), cos(state_k_1(3))); % normalize angle
 
         I = eye(3);
-        P_k_1 = (I - K_th * H_theta) * P_k_1 * (I - K_th * H_theta)' + K_th * R_theta * K_th';
+        P_k_1 = (I - K_th * H_theta) * P_k_1;
     end
 
 end
