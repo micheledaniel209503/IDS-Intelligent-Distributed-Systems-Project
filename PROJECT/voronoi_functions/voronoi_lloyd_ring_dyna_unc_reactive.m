@@ -69,7 +69,7 @@ function [L, areas, masses, centroids, Phi, Wrs_set] = voronoi_lloyd_ring_dyna_u
                 if sigma_k > sigmaMax
                    sigma_k = sigmaMax;                   % saturation
                 end
-                Phi(:,:,k) = gauss2d(X, Y, mu, sigma_k^2*eye(2)); % build Phi (bivariate Gaussian)
+                Phi(:,:,k) = gauss2d(X, Y, mu, sigma_k^2, sigma_k^2); % build Phi (bivariate Gaussian)
 
             case 'r' % ring (adaptive sigma)
                 assert(R>0,'R must be > 0 for adaptive sigma.');
@@ -98,7 +98,7 @@ function [L, areas, masses, centroids, Phi, Wrs_set] = voronoi_lloyd_ring_dyna_u
                     if sigma_k > sigmaMax
                         sigma_k = sigmaMax;                   % saturation
                     end
-                    Phi(:,:,k) = gauss2d(X, Y, mu, sigma_k^2*eye(2));
+                    Phi(:,:,k) = gauss2d(X, Y, mu, sigma_k^2, sigma_k^2);
             otherwise % error management
                 error("Unrecognized working state '%working_state' for Robots(%d).", working_state, idx_use(k));
         end
