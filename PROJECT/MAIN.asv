@@ -16,7 +16,7 @@ PLOT_STATEERROR = 1;
 PLOT_TRACEP = 1;
 PLOT_FORM_ERR = 1;
 USEREACTIVE = true;   % flag: if false --> use standard voronoi (no cutting for the cells, no obstacle avoidance)
-DRAWCONTOUR = false;   % flag: draw contours of the voronoi cells
+DRAWCONTOUR = true;   % flag: draw contours of the voronoi cells
 %% Plot variables
 N_iter = 1000;
 estState = zeros(3,N_iter);
@@ -134,7 +134,7 @@ pkg_loc_error = NaN(Npack,1); % [m]
 %% Robots spawn
 % create the robots, placing them in random positions, avoiding the inbound
 % zone
-Nrobots = 5;
+Nrobots = 10;
 Robots(Nrobots,1) = rob(); % list of rob objects
 
 %% Initialialisation of robots position in the map
@@ -157,7 +157,7 @@ for k = 1:Nrobots
         if  (in_x && in_y)
             Robots(k).state(1) = x;
             Robots(k).state(2) = y;
-            Robots(k).state(3) = -pi + 2 * pi * rand();
+            Robots(k).state(3) = -pi %+ 2 * pi * rand();
             valid_pos = true;
         end
     end
@@ -691,7 +691,7 @@ for k = 1:iter_sim
             plot(Packages(current_pkg).target(1), Packages(current_pkg).target(2), 'gp', 'MarkerSize',12, 'MarkerFaceColor','g');
             drawnow;
             break;  % exit current simulation
-            
+
         end
 
 
@@ -710,8 +710,7 @@ for k = 1:iter_sim
                 Robots(id).omega = omega;
             end
 
-            % compute dynamics for each robot
-            %Robots(id).state = fun(Robots(id).state, u, omega, dt);
+            % compute dynamics for each robot (update of the real state)
             Robots(id).state = fun2(Robots(id).state(1), Robots(id).state(2), Robots(id).state(3), Robots(id).u, Robots(id).omega, dt);
 
             % wrap theta
@@ -721,7 +720,7 @@ for k = 1:iter_sim
         % plot
         if mod(k, refresh_every) == 0
             perc = 100*k/iter_sim;
-            set(hTitle, 'String', sprintf('SIMULATION (WITH UNCERTAINTIES): %.1f%%', perc));
+            set(hTitle, 'String', sprintf('SIMULATION PROGRESS: %.1f%%', perc));
 
             % robots + centroids
             for j = 1:RN
@@ -771,7 +770,7 @@ end
 
 %% Evolution of package position during consensus
 if PLOT_CONSENSUS
-    iterations = 0:n_msg; % t=0 (initial) ... n_msg
+    iterations = 0:n_msg; 
     figure(); clf;
     
     % Subplot X
@@ -793,7 +792,7 @@ if PLOT_CONSENSUS
     for k = 1:nNonNaN
         plot(iterations, squeeze(xStore_sub(k,2,:)), 'LineWidth', 1.5);
     end
-    % Add true Y value as reference line
+    % true Y value as reference line
     yline(Packages(current_pkg).state(2), 'k--', 'LineWidth', 2, 'DisplayName','True Y');
     
     xlabel('Iteration (message step)');

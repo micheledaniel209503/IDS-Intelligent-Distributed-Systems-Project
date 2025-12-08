@@ -102,8 +102,8 @@ disp('Number of robots that see the package: '); disp(nNonNaN);
 % is repeated an INTEGER number of times. es. Qn*...*Q1*Qn IS NOT DOUBLY
 % STOCHASTIC!!!
 
-% In this case a n_msg of 3 times the number of 'active' robots is chosen
-n_msg = 1*nNonNaN;
+% In this case a n_msg of 2 times the number of 'active' robots is chosen
+n_msg = 2*nNonNaN;
 
 
 %% Consensus algorithm (broadcast one at a time) - only among robots that see the package

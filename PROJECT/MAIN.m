@@ -16,7 +16,7 @@ PLOT_STATEERROR = 1;
 PLOT_TRACEP = 1;
 PLOT_FORM_ERR = 1;
 USEREACTIVE = true;   % flag: if false --> use standard voronoi (no cutting for the cells, no obstacle avoidance)
-DRAWCONTOUR = true;   % flag: draw contours of the voronoi cells
+DRAWCONTOUR = false;   % flag: draw contours of the voronoi cells
 %% Plot variables
 N_iter = 1000;
 estState = zeros(3,N_iter);
@@ -36,7 +36,7 @@ toDeg = 180 / pi; % Conversion factor from radians to degrees
 n_msg = 12 ;
 %% Measure Uncertainties
 sigma_UWB = 0.2; % [m] std on the distance measures with the anchors
-sigma_theta = 3*toRad; % [RAD] std on the orientation measure 
+sigma_theta = 5*toRad; % [RAD] std on the orientation measure 
 sigma_LiDAR = 0.1; % [m] std of distance noise
 %% Model Uncertainties
 % Define the system matrix
@@ -134,7 +134,7 @@ pkg_loc_error = NaN(Npack,1); % [m]
 %% Robots spawn
 % create the robots, placing them in random positions, avoiding the inbound
 % zone
-Nrobots = 10;
+Nrobots = 8;
 Robots(Nrobots,1) = rob(); % list of rob objects
 
 %% Initialialisation of robots position in the map
@@ -489,10 +489,6 @@ for pkg_i = 1:Npack
         Robots(idx).target = Packages(current_pkg).state_est(1:2);
     end
 
-    for j = 1:length(Robots)
-        Robots(j).state(3) = 0; % [rad] set robot's orientation to 0
-    end
-
     radius = ceil(sqrt(Packages(current_pkg).s / pi)*1.5); % compute radius from Packages(current_pkg).s circular surface
 
     disp('Radius of the package ');
@@ -575,11 +571,9 @@ for k = 1:iter_sim
         % For the auxiliary plot
         if k <= N_iter && pkg_i == 1
             realPos = Robots(1).state;
-            realPos = realPos(:);
-            realState(:,k) = realPos;
+            realState(:,k) = realPos(:);
             estPos = Robots(1).state_est;
-            estPos = estPos(:);
-            estState(:,k) = estPos;
+            estState(:,k) = estPos(:);
             trP(k) = trace(Robots(1).P);
         end
 
@@ -720,7 +714,7 @@ for k = 1:iter_sim
         % plot
         if mod(k, refresh_every) == 0
             perc = 100*k/iter_sim;
-            set(hTitle, 'String', sprintf('SIMULATION PROGRESS: %.1f%%', perc));
+            set(hTitle, 'String', sprintf('SIMULATION PROGRESS (wrt max. allowable time): %.1f%%', perc));
 
             % robots + centroids
             for j = 1:RN
@@ -805,7 +799,6 @@ end
 if PLOT_STATEERROR
     % Compute estimation error
     errorState = realState - estState;
-
     % Eliminate broken columns
     valid_cols = any(realState ~= 0, 1);
     % Position error (euclidean norm in x,y)
@@ -829,7 +822,7 @@ if PLOT_STATEERROR
     grid on;
     
     subplot(2,1,2);
-    plot(iters, abs(errorState(3,:)), 'LineWidth', 1);
+    plot(iters, abs(atan2(sin(errorState(3,:)), cos(errorState(3,:)))), 'LineWidth', 1);
     ylabel('Error in \theta [rad]');
     xlabel('Iterations');
     grid on;
