@@ -21,7 +21,7 @@ function [state_k_1, P_k_1] = EKF_function(state, v, omega, Dyn_fun, A_fun, G_fu
 
 
     %% --- Update periods ---
-    f_xy = 1; % Frequency for position updates
+    f_xy = 10; % Frequency for position updates
     f_theta = 5; % Frequency for orientation updates
 
     N_xy    = ceil(1 / (f_xy * dt));

@@ -11,12 +11,12 @@ close all
 clear all
 
 %% Auxiliary plot flags
-PLOT_CONSENSUS = 1;
-PLOT_STATEERROR = 1;
-PLOT_TRACEP = 1;
-PLOT_FORM_ERR = 1;
+PLOT_CONSENSUS = 1;   % plot consensus estimate
+PLOT_STATEERROR = 1;  % plot state error in time
+PLOT_TRACEP = 1;      % plot state covariance matrix
+PLOT_FORM_ERR = 1;    % flag: plot formation error metrics
 USEREACTIVE = true;   % flag: if false --> use standard voronoi (no cutting for the cells, no obstacle avoidance)
-DRAWCONTOUR = false;   % flag: draw contours of the voronoi cells
+DRAWCONTOUR = true;   % flag: draw contours of the voronoi cells
 %% Plot variables
 N_iter = 1000;
 estState = zeros(3,N_iter);
@@ -36,7 +36,7 @@ toDeg = 180 / pi; % Conversion factor from radians to degrees
 n_msg = 12 ;
 %% Measure Uncertainties
 sigma_UWB = 0.2; % [m] std on the distance measures with the anchors
-sigma_theta = 5*toRad; % [RAD] std on the orientation measure 
+sigma_theta = 3*toRad; % [RAD] std on the orientation measure 
 sigma_LiDAR = 0.1; % [m] std of distance noise
 %% Model Uncertainties
 % Define the system matrix
@@ -46,13 +46,13 @@ A = @(x, y, theta, vel, omega, dT) [1, 0, -vel * sin(theta) * dT; 0, 1, vel * co
 G = @(x, y, theta, vel, omega, dT)[ dT*cos(theta), 0; dT*sin(theta), 0; 0,  dT ];
 
 % set process noise variances for v and omega
-sigma_v = 0.2;        % m/s 
-sigma_omega = 0.1;    % rad/s 
+sigma_v = 0.2;        % [m/s] 
+sigma_omega = 0.1;    % [rad/s] 
 Q = diag([sigma_v^2, sigma_omega^2]);
 
 %% Formation Control Parameters
-u_max = 1;         % m/s
-omega_max = 0.2;     % rad/s
+u_max = 1;         % [m/s]
+omega_max = 0.2;     % [rad/s]
 
 w_form  = 0.2; % FORMATION TASK
 w_att = 5.0; % TARGET TASK
@@ -65,15 +65,15 @@ iter_sim = T_sim / dt; % Calculate the number of iterations
 
 %% Building the environment
 % --------DEFINITIONS---------
-width = 100;
-height = 80;
+width = 100; % [m]
+height = 80; % [m]
 % ---------MAP-----------
 map.W = width;
 map.H = height;
 map.polygon = [0 0; map.W 0; map.W map.H; 0 map.H];
 % inbound zone
-zones.inbound.W = 30;
-zones.inbound.H = 10;
+zones.inbound.W = 30; % [m]
+zones.inbound.H = 10; % [m]
 zones.inbound.polygon = [
     map.W/2-zones.inbound.W/2 0,
     map.W/2+zones.inbound.W/2 0, 
@@ -81,8 +81,8 @@ zones.inbound.polygon = [
     map.W/2-zones.inbound.W/2 zones.inbound.H
     ];
 % outbound zone
-zones.outbound.W = 20;
-zones.outbound.H = 10;
+zones.outbound.W = 20; % [m]
+zones.outbound.H = 10; % [m]
 zones.outbound1.polygon = [
     0+5, map.H - zones.outbound.H;
     zones.outbound.W + 5, map.H - zones.outbound.H;
@@ -115,9 +115,9 @@ for a = 1:Nanchors
 end
 %% Generate random obstacles in the grid
 Nobs = 4;
-obstacle_dim = 8.0; % [m] characteristic dimension of the obstacles (global)
+obstacle_dim = 8.0; % [m] characteristic dimension of the obstacles
 min_dist = 10 + obstacle_dim; % [m] distance between centers of the obstacles
-
+% spawn obstacles
 Obstacles = spawn_obstacles(Nobs, map, obstacle_dim, min_dist);
 %% package spawn
 Npack = 3; % number of packages
@@ -134,7 +134,7 @@ pkg_loc_error = NaN(Npack,1); % [m]
 %% Robots spawn
 % create the robots, placing them in random positions, avoiding the inbound
 % zone
-Nrobots = 8;
+Nrobots = 9; % number of robots in the map
 Robots(Nrobots,1) = rob(); % list of rob objects
 
 %% Initialialisation of robots position in the map
@@ -272,7 +272,7 @@ wrap = @(a) atan2(sin(a),cos(a));
 for j = 1:length(Robots_voronoi)
     idx = Robots_voronoi(j);
 
-    %% Initialisation for the estimation algorithm (recursive least square)
+    %% Initialisation for the estimation algorithm (weighted least square)
     % true distances to anchors
     distances = sqrt(sum((anchors - [Robots(idx).state(1), Robots(idx).state(2)]).^2, 2));
     % noisy distance measurements
@@ -342,6 +342,8 @@ end
 % initialise simulation plot
 figure(); clf
 
+
+% SIMULATING Npack DELIVERIES
 for pkg_i = 1:Npack
 
     for j = 1:numel(Robots)
@@ -401,17 +403,12 @@ for pkg_i = 1:Npack
     for t = 1:n_msg
 
         % choose the transmitter in round-robin among the robots that see the package
-        % i_local is a LOCAL index (1..nNonNaN), not the global robot id
         i_local = mod(t-1, nNonNaN) + 1;
 
-        % Build Qi_sub (size nNonNaN x nNonNaN)
         % Qi_sub implements the cyclic broadcast gossip: the selected node broadcasts,
         % others update as x_j <- (1-alpha)*x_j + alpha*x_i, and the broadcaster's
-        % own row is set so that Qi_sub is doubly stochastic (so average is preserved).
         Qi_sub = zeros(nNonNaN);
 
-        % Distinguish the case when we have only 2 values, if we keep the
-        % standard algorithm, the solution oscillates
         if nNonNaN == 2
             Qi_sub = 1/2 * ones(2);
         else
@@ -422,13 +419,13 @@ for pkg_i = 1:Npack
                     Qi_sub(i_local,j)= alpha_sub;       % symmetric term to maintain double-stochasticity
                 end
             end
-            % close the balance on the broadcaster diagonal entry
+
             Qi_sub(i_local,i_local) = 1 - alpha_sub*(nNonNaN-1); % ensures rows sum to 1
         end
 
         Q_tot = Qi_sub*Q_tot;
 
-        x_next_sub = Qi_sub * xStore_sub(:,:,t);   % [nNonNaN x 2]
+        x_next_sub = Qi_sub * xStore_sub(:,:,t);
         xStore_sub(:,:,t+1) = x_next_sub;
         
         % store the evolution of the estimated position for plot
@@ -437,7 +434,6 @@ for pkg_i = 1:Npack
             xStore(idxNonNaN,:,t+1) = x_next_sub;
         end
     end
-    %disp(Q_tot);
 
     % assign to the package its own state estimate
     Packages(current_pkg).state_est = mean(xStore_sub(:,:,end),1);
@@ -456,7 +452,6 @@ for pkg_i = 1:Npack
         Robots(j).sr = 12;
     end
 
-    %  --------------------------------------------------------------------------------------------------------
     %% ORGANIZE TRANSPORTATION
     % Based on surface area of the package --> n° robots needed
     Packages(current_pkg).s = 20; % [m^2] surface area of the package
@@ -469,14 +464,11 @@ for pkg_i = 1:Npack
     % Which robots will go? The ones that are closer
     % Considering that, after consensous on package position, all robots can share
     % the information regardless of which ones see the package
-    % Find the indices of the first RN smallest distances
-    % this only works because robots id = robots indices
     [~, sortedIndices] = sort(distances);
     Robots_selected_id = sortedIndices(1:RN);
 
-    % Associate the package to the robots, using the field item_id
     for i=1:length(Robots_selected_id)
-        Robots(Robots_selected_id(i)).item_id = current_pkg; % change with more than one package
+        Robots(Robots_selected_id(i)).item_id = current_pkg;
     end
 
     disp('Indices of robots selected to carry the package: ');
@@ -490,9 +482,6 @@ for pkg_i = 1:Npack
     end
 
     radius = ceil(sqrt(Packages(current_pkg).s / pi)*1.5); % compute radius from Packages(current_pkg).s circular surface
-
-    disp('Radius of the package ');
-    disp([radius]);
     Packages(current_pkg).r = radius;
 
     %% TARGET of the package, in the OUTBOUND zone
@@ -584,7 +573,7 @@ for k = 1:iter_sim
             distances_noisy = distances + sigma_UWB * randn(Nanchors, 1);
             % trilateration
             [H_tril,z_tril,R_tril] = trilateration(anchors, distances_noisy, sigma_UWB);
-            H_tril = [H_tril, zeros(size(H_tril,1),1)];  % Extend trilateration Jacobian
+            H_tril = [H_tril, zeros(size(H_tril,1),1)];
             % Orientation measure
             z_theta = Robots(j).state(3) + sigma_theta*randn();
             H_theta = [0, 0, 1];
@@ -772,7 +761,6 @@ if PLOT_CONSENSUS
     for k = 1:nNonNaN
         plot(iterations, squeeze(xStore_sub(k,1,:)), 'LineWidth', 1.5);
     end
-    % Add true X value as reference line
     yline(Packages(current_pkg).state(1), 'k--', 'LineWidth', 2, 'DisplayName','True X');
     
     xlabel('Iteration (message step)');
@@ -936,7 +924,7 @@ for i = 1:Nrobots
         x_plot = x_i; x_plot(~mask) = NaN;
         y_plot = y_i; y_plot(~mask) = NaN;
 
-        lw = isSelected*1.2 + 1.2;   % spessore aumentato per i selected
+        lw = isSelected*1.2 + 1.2;
         plot(x_plot, y_plot, '-', 'Color', col_ring, 'LineWidth', lw);
 
         idx_valid = find(mask);
